@@ -1,0 +1,57 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 环境变量与密钥文件（防误提交）
+.env
+.env.*
+!.env.example
+
+# 本地工作隔离与执行脚手架（不入库）
+.worktrees/
+.superpowers/
+
+# 工具会话临时文件与临时产物
+.zcode/
+*.tmp
+*.bak
+*.orig
+
+# test artifacts
+test-results/
+playwright-report/
+e2e-artifacts/
+tools/
+
+# Tauri 构建产物与生成文件
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# 个人数据与本地文档（不入库，保留在本地工作区）
+docs/
+# docs/ 的渲染脚本与头文案，随 docs 留在本地
+export-md.mjs
+md-header-v54.txt
+
+# 更新签名私钥（永不入库）
+*.key

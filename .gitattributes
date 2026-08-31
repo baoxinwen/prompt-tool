@@ -1,0 +1,11 @@
+# 统一换行符：仓库内一律 LF，避免 Windows/跨平台协作的换行符损伤
+* text=auto eol=lf
+
+# 二进制文件不做换行符处理
+*.png binary
+*.ico binary
+*.icns binary
+
+# linguist 标注：让 GitHub 正确统计语言占比
+pnpm-lock.yaml linguist-generated=true
+src-tauri/Cargo.lock linguist-generated=true
