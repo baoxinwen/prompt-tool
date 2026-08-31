@@ -1,0 +1,59 @@
+{
+  "name": "prompt-tool",
+  "description": "本地优先的跨平台桌面提示词管理工具（Tauri 2 + Vue 3），支持 Windows 与 macOS",
+  "private": true,
+  "license": "MIT",
+  "version": "1.0.0",
+  "type": "module",
+  "packageManager": "pnpm@10.18.1",
+  "keywords": [
+    "prompt",
+    "prompts",
+    "productivity",
+    "clipboard",
+    "tauri",
+    "vue",
+    "desktop-app",
+    "windows",
+    "macos"
+  ],
+  "author": "baoxinwen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/baoxinwen/prompt-tool.git"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:e2e": "playwright test",
+    "build:debug": "pnpm build && tauri build --debug --no-bundle",
+    "test:e2e:fullstack": "pnpm build:debug && node --test e2e-webdriver/smoke.test.mjs"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/noto-serif-sc": "^5.2.8",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "lucide-vue-next": "^1.0.0",
+    "pinyin-pro": "^3.29.3",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^26.4.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.5.0",
+    "happy-dom": "^20.12.0",
+    "selenium-webdriver": "^4.48.0",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.3",
+    "vitest": "^4.1.11",
+    "vue-tsc": "^2.1.10"
+  }
+}
