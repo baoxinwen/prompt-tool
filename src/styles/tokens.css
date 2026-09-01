@@ -1,0 +1,297 @@
+/* ============================================
+   Prompt Tool 设计令牌 ·「墨与纸 Ink & Paper」
+   遵循 minimalist-ui：暖纸底 / 碳墨字 / 发丝线 / 零渐变零光晕
+   分层：primitive（原料值）→ semantic（语义别名，组件只用这层）→ component（组件级派生）
+   深色为结构默认（:root，「墨夜」暖炭），亮色 / 跟随系统为覆盖层（「墨与纸」暖纸）
+   配套规范：docs/design-system/prompt-tool/MASTER.md
+   签名元素：键帽（kbd）与 {{变量}} 等宽记号
+   ============================================ */
+
+/* ---------- 原料层（primitive）：纸与墨，禁止在组件里直接引用 ---------- */
+:root {
+  /* 纸（暖，微黄，不带蓝紫偏色） */
+  --paper-0: #ffffff;
+  --paper-50: #f8f7f4;
+  --paper-100: #f3f1ec;
+  --paper-150: #ecebe5;
+  --paper-200: #e4e2da;
+  --paper-300: #d8d5cb;
+
+  /* 墨（暖炭，黑中带一点棕） */
+  --ink-900: #201e19;
+  --ink-700: #3a3830;
+  --ink-500: #6e6b62;
+  --ink-400: #8b887e;
+  --ink-300: #aba79b;
+  --ink-200: #c9c5b8;
+
+  /* 墨夜（暗色主题的暖炭面） */
+  --night-900: #161511;
+  --night-800: #1a1915;
+  --night-700: #1f1e19;
+  --night-600: #26251f;
+  --night-500: #2f2d25;
+
+  /* 骨白（暗色主题的反白强调，替代旧品牌靛紫） */
+  --bone-300: #d8d3c4;
+  --bone-200: #e2ddcf;
+  --bone-100: #e9e5da;
+
+  /* 语义功能色（低饱和纸感，小面积使用） */
+  --signal-red: #a83a32;
+  --signal-red-dark: #c4524a;
+  --signal-green: #4a7a40;
+  --signal-green-dark: #82a96b;
+  --signal-amber: #956400;
+  --signal-amber-dark: #d9a94e;
+
+  /* 阴影基色（随主题面色的暖棕，不用纯黑） */
+  --shade-light: 58, 54, 45;
+  --shade-dark: 12, 11, 8;
+}
+
+/* ---------- 语义层（semantic）：组件代码只允许引用这一层 ---------- */
+:root {
+  /* 字体：界面声部（无衬线）+ 标题声部（衬线）+ 数据声部（等宽） */
+  --font-ui: 'Inter', 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+  --font-display: 'Noto Serif SC', Georgia, 'Times New Roman', 'STSong', serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
+
+  /* 字阶（6 级） */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+  --fs-2xl: 23px;
+
+  /* z-index 刻度 */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 20;
+  --z-overlay: 40; /* 应用内遮罩（确认框 / 全文浮层） */
+  --z-dialog: 50; /* 遮罩之上的模态弹窗（变量表单） */
+  --z-capture: 60; /* 全屏捕获遮罩（快捷键录制），须压过弹窗 */
+  --z-toast: 100; /* 通知条，永远最上 */
+
+  /* 品牌：墨为主、骨白为辅。渐变与光晕已废弃；实心墨块是唯一强调 */
+  /* 品牌（墨夜）：骨白为墨——暗色下强调反白，主按钮骨白底 + 暖炭字 */
+  --brand: var(--bone-300);
+  --brand-strong: var(--bone-200);
+  --brand-btn: var(--bone-300);
+  --brand-btn-hover: var(--bone-200);
+  --on-brand: #23211b;
+  --brand-2: var(--bone-100);
+  --brand-soft: rgba(216, 211, 196, 0.09);
+  --brand-soft-2: rgba(216, 211, 196, 0.16);
+  --ring: rgba(216, 211, 196, 0.45);
+  /* 兼容名保留：原「命令栏聚焦光晕」现为发丝级聚焦环，无光晕 */
+  --glow: 0 0 0 1px var(--brand-soft-2), 0 0 0 3px var(--brand-soft);
+
+  /* 中性色（墨夜 · 暖炭，微暖不偏蓝） */
+  --bg: var(--night-900);
+  --bg-soft: var(--night-800);
+  --panel: var(--night-700);
+  --panel-2: var(--night-600);
+  --panel-3: var(--night-500);
+  --panel-glass: rgba(31, 30, 25, 0.88);
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #efede6;
+  --text-2: #b8b4a7;
+  --muted: #8b877a;
+  --faint: #605d51;
+
+  /* 功能色（语义，小面积使用） */
+  --danger: #e08a80;
+  --danger-btn: var(--signal-red-dark);
+  --danger-soft: rgba(196, 82, 74, 0.16);
+  --ok: var(--signal-green-dark);
+  --ok-soft: rgba(130, 169, 107, 0.14);
+  --warn: var(--signal-amber-dark);
+  --warn-soft: rgba(217, 169, 78, 0.14);
+
+  /* 交互 */
+  --accent: var(--brand);
+  --input-bg: var(--night-600);
+  --input-focus-bg: var(--night-500);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.14);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.26);
+  --mask-bg: rgba(12, 11, 8, 0.55);
+
+  /* 圆角（纸感的克制圆角） */
+  --r-xs: 5px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+
+  /* 阴影：暖棕阴影 + 极轻，无边框发光 */
+  --shadow-1: 0 1px 3px rgba(var(--shade-dark), 0.35);
+  --shadow-2: 0 16px 48px rgba(var(--shade-dark), 0.5), 0 2px 8px rgba(var(--shade-dark), 0.4);
+  /* 兼容名保留：原品牌投影现为安静的落影 */
+  --shadow-brand: 0 1px 3px rgba(var(--shade-dark), 0.4);
+
+  /* 动效（emil 法则：ease-out 优先，UI 全部 <300ms） */
+  --ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --t-fast: 110ms var(--ease);
+  --t-med: 190ms var(--ease);
+
+  /* 旧令牌别名（兼容未迁移的引用） */
+  --brand-a: var(--brand);
+  --brand-b: var(--brand-2);
+  --brand-gradient: none;
+  --brand-grad: none;
+  --radius-sm: var(--r-sm);
+
+  color-scheme: dark;
+}
+
+/* ---------- 亮色主题值：「墨与纸」（单一来源，评审 M10） ----------
+   light 与 auto(亮) 两个覆盖块都只引用这里的 --lt-* 中间层，
+   调色只改这一处，杜绝两块手抄漂移 */
+:root {
+  --lt-brand: var(--ink-900);
+  --lt-brand-strong: var(--ink-700);
+  --lt-brand-btn: var(--ink-900);
+  --lt-brand-btn-hover: var(--ink-700);
+  --lt-on-brand: #ffffff;
+  --lt-brand-2: var(--ink-500);
+  --lt-brand-soft: rgba(32, 30, 25, 0.05);
+  --lt-brand-soft-2: rgba(32, 30, 25, 0.09);
+  --lt-ring: rgba(32, 30, 25, 0.4);
+  --lt-glow: 0 0 0 1px var(--lt-brand-soft-2), 0 0 0 3px var(--lt-brand-soft);
+
+  --lt-bg: var(--paper-50);
+  --lt-bg-soft: var(--paper-100);
+  --lt-panel: var(--paper-0);
+  --lt-panel-2: var(--paper-100);
+  --lt-panel-3: var(--paper-150);
+  --lt-panel-glass: rgba(255, 255, 255, 0.92);
+  --lt-border: rgba(32, 30, 25, 0.09);
+  --lt-border-strong: rgba(32, 30, 25, 0.17);
+  --lt-text: var(--ink-900);
+  --lt-text-2: var(--ink-500);
+  --lt-muted: var(--ink-400);
+  --lt-faint: var(--ink-300);
+
+  --lt-danger: var(--signal-red);
+  --lt-danger-btn: var(--signal-red);
+  --lt-danger-soft: rgba(168, 58, 50, 0.09);
+  --lt-ok: var(--signal-green);
+  --lt-ok-soft: rgba(74, 122, 64, 0.1);
+  --lt-warn: var(--signal-amber);
+  --lt-warn-soft: rgba(149, 100, 0, 0.1);
+
+  --lt-input-bg: var(--paper-0);
+  --lt-input-focus-bg: var(--paper-0);
+  --lt-scrollbar-thumb: rgba(32, 30, 25, 0.18);
+  --lt-scrollbar-thumb-hover: rgba(32, 30, 25, 0.3);
+  --lt-mask-bg: rgba(50, 47, 40, 0.35);
+
+  --lt-shadow-1: 0 1px 3px rgba(var(--shade-light), 0.07);
+  --lt-shadow-2: 0 12px 32px rgba(var(--shade-light), 0.1), 0 1px 3px rgba(var(--shade-light), 0.06);
+  --lt-shadow-brand: 0 1px 2px rgba(var(--shade-light), 0.12);
+}
+
+/* ---------- 亮色主题：「墨与纸」 ---------- */
+:root[data-theme='light'] {
+  --brand: var(--lt-brand);
+  --brand-strong: var(--lt-brand-strong);
+  --brand-btn: var(--lt-brand-btn);
+  --brand-btn-hover: var(--lt-brand-btn-hover);
+  --on-brand: var(--lt-on-brand);
+  --brand-2: var(--lt-brand-2);
+  --brand-soft: var(--lt-brand-soft);
+  --brand-soft-2: var(--lt-brand-soft-2);
+  --ring: var(--lt-ring);
+  --glow: var(--lt-glow);
+
+  --bg: var(--lt-bg);
+  --bg-soft: var(--lt-bg-soft);
+  --panel: var(--lt-panel);
+  --panel-2: var(--lt-panel-2);
+  --panel-3: var(--lt-panel-3);
+  --panel-glass: var(--lt-panel-glass);
+  --border: var(--lt-border);
+  --border-strong: var(--lt-border-strong);
+  --text: var(--lt-text);
+  --text-2: var(--lt-text-2);
+  --muted: var(--lt-muted);
+  --faint: var(--lt-faint);
+
+  --danger: var(--lt-danger);
+  --danger-btn: var(--lt-danger-btn);
+  --danger-soft: var(--lt-danger-soft);
+  --ok: var(--lt-ok);
+  --ok-soft: var(--lt-ok-soft);
+  --warn: var(--lt-warn);
+  --warn-soft: var(--lt-warn-soft);
+
+  --input-bg: var(--lt-input-bg);
+  --input-focus-bg: var(--lt-input-focus-bg);
+  --scrollbar-thumb: var(--lt-scrollbar-thumb);
+  --scrollbar-thumb-hover: var(--lt-scrollbar-thumb-hover);
+  --mask-bg: var(--lt-mask-bg);
+
+  --shadow-1: var(--lt-shadow-1);
+  --shadow-2: var(--lt-shadow-2);
+  --shadow-brand: var(--lt-shadow-brand);
+
+  color-scheme: light;
+}
+
+/* ---------- 跟随系统：深 ---------- */
+@media (prefers-color-scheme: dark) {
+  :root[data-theme='auto'] {
+    color-scheme: dark;
+  }
+}
+
+/* ---------- 跟随系统：亮 ---------- */
+@media (prefers-color-scheme: light) {
+  :root[data-theme='auto'] {
+    --brand: var(--lt-brand);
+    --brand-strong: var(--lt-brand-strong);
+    --brand-btn: var(--lt-brand-btn);
+    --brand-btn-hover: var(--lt-brand-btn-hover);
+    --on-brand: var(--lt-on-brand);
+    --brand-2: var(--lt-brand-2);
+    --brand-soft: var(--lt-brand-soft);
+    --brand-soft-2: var(--lt-brand-soft-2);
+    --ring: var(--lt-ring);
+    --glow: var(--lt-glow);
+
+    --bg: var(--lt-bg);
+    --bg-soft: var(--lt-bg-soft);
+    --panel: var(--lt-panel);
+    --panel-2: var(--lt-panel-2);
+    --panel-3: var(--lt-panel-3);
+    --panel-glass: var(--lt-panel-glass);
+    --border: var(--lt-border);
+    --border-strong: var(--lt-border-strong);
+    --text: var(--lt-text);
+    --text-2: var(--lt-text-2);
+    --muted: var(--lt-muted);
+    --faint: var(--lt-faint);
+
+    --danger: var(--lt-danger);
+    --danger-btn: var(--lt-danger-btn);
+    --danger-soft: var(--lt-danger-soft);
+    --ok: var(--lt-ok);
+    --ok-soft: var(--lt-ok-soft);
+    --warn: var(--lt-warn);
+    --warn-soft: var(--lt-warn-soft);
+
+    --input-bg: var(--lt-input-bg);
+    --input-focus-bg: var(--lt-input-focus-bg);
+    --scrollbar-thumb: var(--lt-scrollbar-thumb);
+    --scrollbar-thumb-hover: var(--lt-scrollbar-thumb-hover);
+    --mask-bg: var(--lt-mask-bg);
+
+    --shadow-1: var(--lt-shadow-1);
+    --shadow-2: var(--lt-shadow-2);
+    --shadow-brand: var(--lt-shadow-brand);
+
+    color-scheme: light;
+  }
+}
