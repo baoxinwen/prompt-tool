@@ -1,0 +1,34 @@
+{
+  "app": "Prompt Tool",
+  "version": 1,
+  "exportedAt": 1789000000000,
+  "categories": ["样例分类"],
+  "prompts": [
+    {
+      "id": "sample-001",
+      "title": "01 样例需求梳理",
+      "content": "把想法整理成需求清单：{{项目想法|一段话说清要做什么、给谁用}}，按 MoSCoW 分级并圈出本期 MVP。",
+      "category": "样例分类",
+      "tags": ["样例", "需求"],
+      "pinned": false,
+      "hotkey": "",
+      "useCount": 0,
+      "lastUsedAt": 0,
+      "createdAt": 1789000000000,
+      "updatedAt": 1789000000000
+    },
+    {
+      "id": "sample-002",
+      "title": "02 样例代码评审",
+      "content": "对当前改动逐条审查，只输出经过验证的意见清单，不直接修复；纯风格问题不收录。",
+      "category": "样例分类",
+      "tags": [],
+      "pinned": true,
+      "hotkey": "",
+      "useCount": 3,
+      "lastUsedAt": 1789000000000,
+      "createdAt": 1789000000000,
+      "updatedAt": 1789000000000
+    }
+  ]
+}
