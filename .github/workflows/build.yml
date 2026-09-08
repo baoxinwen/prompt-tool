@@ -1,0 +1,120 @@
+name: Build Release
+
+# 顶层最小权限：test job 只读；build job 内单独放宽为 contents: write
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test (windows)
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust 编译缓存
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      # 测试门禁：任一环节失败则后续构建发版全部中断
+      - name: 前端与组件测试（Vitest）
+        run: pnpm test
+
+      # 浏览器端 e2e（shim 模式）：windows-latest 自带 Edge，无需额外安装浏览器
+      - name: 浏览器端 E2E（Playwright/shim）
+        run: pnpm test:e2e
+
+      - name: Rust 单元与集成测试（cargo test）
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: 类型检查与构建（vue-tsc + vite build）
+        run: pnpm build
+
+  build:
+    needs: [test]
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # 打 tag 推送时创建 Release 需要写权限
+    strategy:
+      matrix:
+        os: [windows-latest]
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust 编译缓存
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      # 先确保 Release 存在：tauri-action 在部分新仓库上创建 Release 会 403，
+      # 但上传到已存在的 Release 正常；此步骤幂等，已存在时直接跳过。
+      # 预发布 tag（版本号含 -，如 v1.2.0-rc.1）创建的 Release 标记为 prerelease，
+      # 不会被 GitHub 标为 Latest
+      - name: 确保 Release 存在
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then PRERELEASE_FLAG="--prerelease"; fi
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "Prompt Tool $GITHUB_REF_NAME" \
+              $PRERELEASE_FLAG \
+              --notes "Prompt Tool $GITHUB_REF_NAME"
+
+      # 构建 Windows NSIS 安装包；打 v* 标签推送时产物附加到 Release，
+      # 普通推送仅构建（产物在 Actions 运行页下载）
+      - name: 构建 Tauri 应用
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('Prompt Tool {0}', github.ref_name) || '' }}
+          releaseDraft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          includeUpdaterJson: ${{ !contains(github.ref_name, '-') }}
