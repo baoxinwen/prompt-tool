@@ -20,6 +20,19 @@ pub const SUPPRESS_WINDOW: Duration = Duration::from_millis(POLL_INTERVAL_MS + 1
 
 const MAX_IMAGES: usize = 50;
 
+/// 剪贴板变化序列号：Win32 GetClipboardSequenceNumber 只在剪贴板内容
+/// 变化时递增，读取它无需打开剪贴板、不拷贝内容。纯图片剪贴板若每个
+/// 700ms 周期都全量 get_image（4K 图约 33MB），会持续消耗 CPU 与内存
+/// 带宽（评审 I16），必须先查序号再决定是否全量读
+fn clipboard_sequence() -> Option<u32> {
+    use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
+    // 返回 0 表示调用失败（无剪贴板支持），视为不可用
+    match unsafe { GetClipboardSequenceNumber() } {
+        0 => None,
+        n => Some(n),
+    }
+}
+
 /// 多点采样哈希：只看首尾 32 字节时，中部内容不同的两张图（如仅改中部的截图）
 /// 会被误判为同一张而漏记历史
 fn image_hash(width: usize, height: usize, data: &[u8]) -> u64 {
@@ -52,9 +65,19 @@ pub fn spawn(app: AppHandle) {
             .get_image()
             .ok()
             .map(|i| image_hash(i.width, i.height, &i.bytes));
+        let mut last_seq = clipboard_sequence();
 
         loop {
             std::thread::sleep(POLL_INTERVAL);
+
+            // 序号未变 ⇒ 内容未变，跳过本周期全部读取（评审 I16）。
+            // 序号不可用的平台退回原全量采样行为
+            if let Some(seq) = clipboard_sequence() {
+                if last_seq == Some(seq) {
+                    continue;
+                }
+                last_seq = Some(seq);
+            }
 
             // 文本优先；剪贴板是图片时 get_text 会失败
             if let Ok(text) = board.get_text() {

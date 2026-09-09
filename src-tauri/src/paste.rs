@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-/// 模拟粘贴/复制/回车按键。Windows 用 SendInput(Ctrl+V)。
-#[cfg(windows)]
+/// 模拟粘贴/复制/回车按键：SendInput(Ctrl+V)。
+/// 本项目仅支持 Windows，按键注入直接使用 Win32 API（不保留跨平台桩）
 mod keys {
     fn press_combo(vk_modifier: u16, vk_key: u16) {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
@@ -75,8 +75,33 @@ pub fn press_ctrl_c() {
     keys::press_copy();
 }
 
+/// 等待用户物理按住的修饰键（Alt/Ctrl/Shift）释放，最多等 timeout。
+/// 热键回调在按下瞬间即触发，用户"按住稍久"的习惯会让注入的 Ctrl+C/V
+/// 叠加物理 Alt 变成 Alt+Ctrl+C/V，目标应用不当作复制/粘贴处理（评审 I14）。
+/// 超时未释放也返回（尽力而为，不无限阻塞捕获/粘贴流程）
+pub fn wait_modifiers_released(timeout: Duration) -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
+    };
+    const PRESSED: u16 = 0x8000;
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let held = unsafe {
+            [VK_MENU, VK_CONTROL, VK_SHIFT]
+                .iter()
+                .any(|&vk| (GetAsyncKeyState(vk as i32) as u16) & PRESSED != 0)
+        };
+        if !held {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 /// 呼出面板前的前台窗口，粘贴时唤回它，保证粘贴落点正确。
-#[cfg(windows)]
 pub mod foreground {
     use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{keybd_event, KEYEVENTF_KEYUP, VK_MENU};
@@ -138,7 +163,6 @@ pub fn get_clipboard_text() -> Option<String> {
 /// Windows 下在发送前校验目标确实回到前台，失败重试一次，仍失败则放弃——
 /// 固定延时无法保证焦点切换成功，盲发会把内容粘进恰好在前台的其他应用。
 pub fn send_paste(target: Option<isize>, append_enter: bool) {
-    #[cfg(windows)]
     match target {
         Some(hwnd) => {
             std::thread::sleep(Duration::from_millis(60));
@@ -152,6 +176,8 @@ pub fn send_paste(target: Option<isize>, append_enter: bool) {
                 eprintln!("[prompt-tool] 粘贴目标未回到前台，已取消按键以防误粘");
                 return;
             }
+            // 等物理修饰键释放，防止注入组合被叠加成 Alt+Ctrl+V 等（评审 I14）
+            wait_modifiers_released(Duration::from_millis(400));
             press_ctrl_v();
             if append_enter {
                 std::thread::sleep(Duration::from_millis(60));
@@ -160,6 +186,7 @@ pub fn send_paste(target: Option<isize>, append_enter: bool) {
         }
         None => {
             std::thread::sleep(Duration::from_millis(200));
+            wait_modifiers_released(Duration::from_millis(400));
             press_ctrl_v();
             if append_enter {
                 std::thread::sleep(Duration::from_millis(60));
@@ -217,12 +244,18 @@ pub fn paste_text(app: &tauri::AppHandle, text: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 面板粘贴：隐藏面板让焦点回到上一个窗口，然后后台粘贴
+/// 面板粘贴：先写剪贴板（失败立即返回，面板保持可见、错误 toast 才能被
+/// 用户看到），成功后才隐藏面板让焦点回到上一个窗口，然后后台粘贴。
+/// 旧实现「先隐藏再写」，写失败时 toast 渲染在已隐藏的窗口上，
+/// 操作静默整体丢失，且与图片粘贴路径（成功才 hide）不一致（评审 I1）
 pub fn paste_to_previous_window(
     window: &tauri::WebviewWindow,
     app: &tauri::AppHandle,
     text: &str,
 ) -> Result<(), String> {
-    let _ = window.hide();
-    paste_text(app, text)
+    let result = paste_text(app, text);
+    if result.is_ok() {
+        let _ = window.hide();
+    }
+    result
 }

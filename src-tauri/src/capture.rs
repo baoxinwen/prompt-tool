@@ -30,6 +30,9 @@ pub fn start(app: &AppHandle) {
         store.paste_generation
     };
 
+    // 等物理修饰键释放：热键回调在按下瞬间触发，物理 Alt 未释放时
+    // 注入的 Ctrl+C 会被叠加成 Alt+Ctrl+C，目标应用不当作复制（评审 I14）
+    crate::paste::wait_modifiers_released(Duration::from_millis(400));
     crate::paste::press_ctrl_c();
 
     let handle = app.clone();
