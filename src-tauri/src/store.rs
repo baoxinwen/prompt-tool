@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 
 use crate::creds::{CredentialBackend, CredMemo, KeyringBackend};
-use crate::models::AppData;
+use crate::models::{AppData, ClipboardItem};
 
 /// 共享数据仓库：内存数据 + 本地 JSON 持久化
 pub struct Store {
@@ -29,6 +29,10 @@ pub struct Store {
     /// 后台延时收尾线程（恢复原剪贴板/解除抑制）只在代际未变时执行，
     /// 防止快速连续两次操作时旧会话覆盖新会话的剪贴板内容
     pub paste_generation: u64,
+    /// 最近一次「清空剪贴板历史」的条目（内存态，不持久化），供撤销恢复。
+    /// Store 整体已在 Mutex 之后，无需再嵌套锁；被覆盖或应用退出时
+    /// 才对其中的图片文件执行延迟删除
+    pub stash: Option<Vec<ClipboardItem>>,
 }
 
 pub type SharedStore = Mutex<Store>;
@@ -126,6 +130,7 @@ impl Store {
             mutations: 0,
             recovered_notice,
             paste_generation: 0,
+            stash: None,
         })
     }
 
@@ -187,6 +192,29 @@ impl Store {
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
+    /// 仅供同 crate 单元测试构造 Store：字段私有，sync.rs 等模块无法直接
+    /// 构造。凭据后端固定为内存实现，不触碰系统 keyring
+    #[cfg(test)]
+    pub(crate) fn test_store(dir: &Path) -> Store {
+        let path = dir.join("data.json");
+        let creds: Arc<dyn CredentialBackend> = Arc::new(crate::creds::MemoryBackend::default());
+        let mut memo = CredMemo::default();
+        let (data, notice) = load_or_recover_with(&path, creds.as_ref(), &mut memo);
+        Store {
+            data,
+            path,
+            creds,
+            cred_memo: Mutex::new(memo),
+            suppress_clipboard: false,
+            paste_target: None,
+            dirty_unsynced: false,
+            mutations: 0,
+            recovered_notice: notice,
+            paste_generation: 0,
+            stash: None,
+        }
+    }
+
     /// 后台收尾线程专用：仅当代际未变（期间没有新的剪贴板写入会话）时
     /// 解除抑制。旧会话提前解除会把新会话写入的内容误记进历史（评审 I2）。
     /// 返回是否实际解除
@@ -223,7 +251,7 @@ mod tests {
     }
 
     fn store_in(dir: &Path) -> Store {
-        store_in_with(Arc::new(crate::creds::MemoryBackend::default()), dir)
+        Store::test_store(dir)
     }
 
     fn store_in_with(creds: Arc<dyn CredentialBackend>, dir: &Path) -> Store {
@@ -241,6 +269,7 @@ mod tests {
             mutations: 0,
             recovered_notice: notice,
             paste_generation: 0,
+            stash: None,
         }
     }
 

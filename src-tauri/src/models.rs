@@ -177,6 +177,10 @@ pub struct Settings {
     /// 用户选择跳过的更新版本（只抑制启动提示，不影响设置页展示）
     #[serde(default)]
     pub skipped_update_version: Option<String>,
+    /// 最近一次云同步成功的毫秒时间戳：仅在 run_sync 成功返回处统一写入，
+    /// 失败保持原值（前端展示「上次同步 · N 分钟前」）
+    #[serde(default)]
+    pub last_sync_at: Option<i64>,
 }
 
 fn default_hotkey() -> String {
@@ -230,6 +234,7 @@ impl Default for Settings {
             sync_clipboard: false,
             auto_update_check: true,
             skipped_update_version: None,
+            last_sync_at: None,
         }
     }
 }
@@ -643,6 +648,27 @@ mod tests {
         let item: ClipboardItem = serde_json::from_str(raw).expect("缺 kind 必须可解析");
         assert_eq!(item.kind, "text");
         assert!(!item.is_image());
+    }
+
+    #[test]
+    fn settings_last_sync_at_serializes_camel_case_and_defaults_none() {
+        let mut s = Settings::default();
+        assert_eq!(s.last_sync_at, None, "新字段默认必须为 None");
+        s.last_sync_at = Some(1_710_000_000_000);
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(
+            json.contains("\"lastSyncAt\":1710000000000"),
+            "序列化字段名必须是 camelCase 的 lastSyncAt: {json}"
+        );
+        let parsed: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.last_sync_at, Some(1_710_000_000_000), "往返必须保值");
+
+        // 旧版 data.json 没有该字段：缺省 None，正常解析不报错
+        let old: Settings = serde_json::from_str(
+            r#"{"hotkey":"alt+q","theme":"light","webdav":{},"gist":{},"syncProvider":"webdav"}"#,
+        )
+        .expect("缺 lastSyncAt 的旧数据必须可解析");
+        assert_eq!(old.last_sync_at, None);
     }
 }
 

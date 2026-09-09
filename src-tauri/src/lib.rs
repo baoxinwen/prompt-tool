@@ -56,7 +56,7 @@ fn create_windows(app: &tauri::App, e2e: bool) -> tauri::Result<()> {
     // 快速捕获小窗
     WebviewWindowBuilder::new(app, "capture", WebviewUrl::default())
         .title("快速捕获")
-        .inner_size(360.0, 320.0)
+        .inner_size(440.0, 370.0)
         .resizable(false)
         .decorations(false)
         .always_on_top(true)
@@ -171,6 +171,7 @@ pub fn run() {
             commands::copy_image,
             commands::delete_history_item,
             commands::clear_history,
+            commands::restore_history,
             commands::hide_quick,
             commands::open_manager,
             commands::close_capture,
@@ -192,6 +193,12 @@ pub fn run() {
             commands::download_and_install_update,
             commands::open_release_page,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Prompt Tool");
+        .build(tauri::generate_context!())
+        .expect("error while building Prompt Tool")
+        .run(|app, event| {
+            // 应用退出：清空撤销的 stash 再无恢复机会，其中图片文件此刻统一删盘
+            if matches!(event, tauri::RunEvent::Exit) {
+                commands::purge_stash_images(app);
+            }
+        });
 }

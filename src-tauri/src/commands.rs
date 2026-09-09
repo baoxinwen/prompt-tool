@@ -3,7 +3,7 @@ use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
-use crate::models::{new_id, now_ms, AppData, Prompt, Settings, SyncReport};
+use crate::models::{new_id, now_ms, AppData, ClipboardItem, Prompt, Settings, SyncReport};
 use crate::store::lock;
 use crate::transfer;
 use crate::updater;
@@ -480,36 +480,72 @@ pub async fn delete_history_item(app: AppHandle, id: String) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub async fn clear_history(app: AppHandle) -> Result<(), String> {
+pub async fn clear_history(app: AppHandle) -> Result<usize, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let image_ids: Vec<String> = {
-            let store = lock(&app);
-            store
-                .data
-                .clipboard
-                .iter()
-                .filter(|i| i.is_image())
-                .map(|i| i.id.clone())
-                .collect()
-        };
-        {
+        let count = {
             let mut store = lock(&app);
-            let ids: Vec<String> = store.data.clipboard.iter().map(|i| i.id.clone()).collect();
+            let count = store.data.clipboard.len();
+            // 清空历史进 stash（不删图片文件，撤销可原样恢复）
+            store.stash = Some(std::mem::take(&mut store.data.clipboard));
             store.mutate(|d| {
                 d.clipboard.clear();
-                for id in ids {
-                    d.tombstone(&id);
-                }
             })?;
-        }
-        for id in image_ids {
-            crate::images::delete_files(&app, &id);
-        }
+            count
+        };
         emit_data_changed(&app);
-        Ok(())
+        Ok(count)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn restore_history(app: AppHandle) -> Result<usize, String> {
+    let mut store = lock(&app);
+    let Some(stashed) = store.stash.take() else {
+        return Ok(0);
+    };
+    // stash 条目按 id 与现存历史去重后并回；恢复条目 copied_at 刷新为当前时刻，
+    // 使其 > 任何既有墓碑 at（双向 merge 收敛到「已恢复」，不被同步回退误删）
+    let now = crate::models::now_ms();
+    let mut restored: usize = 0;
+    for mut item in stashed {
+        if !store.data.clipboard.iter().any(|i| i.id == item.id) {
+            item.copied_at = now;
+            store.data.clipboard.push(item);
+            restored += 1;
+        }
+    }
+    let live_ids: std::collections::HashSet<String> =
+        store.data.clipboard.iter().map(|i| i.id.clone()).collect();
+    store.data.tombstones.retain(|t| !live_ids.contains(&t.id));
+    if restored > 0 {
+        store.save().map_err(|e| e.to_string())?;
+    }
+    Ok(restored)
+}
+
+/// 收集 stash 里的图片文件引用（delete_files 需要去掉 .png 的 base 名再拼回）
+fn stash_image_files(stash: &[ClipboardItem]) -> Vec<String> {
+    stash
+        .iter()
+        .filter(|i| i.is_image())
+        .filter_map(|i| i.image.as_ref().map(|im| im.file.clone()))
+        .collect()
+}
+
+/// 应用退出时收口 stash：图片文件统一删盘（再无恢复机会）
+pub fn purge_stash_images(app: &AppHandle) {
+    let files = {
+        let mut store = lock(app);
+        let stash = store.stash.take();
+        stash_image_files(stash.as_deref().unwrap_or(&[]))
+    };
+    for f in files {
+        if let Some(base) = f.strip_suffix(".png") {
+            crate::images::delete_files(app, base);
+        }
+    }
 }
 
 // ---------- 窗口控制 ----------

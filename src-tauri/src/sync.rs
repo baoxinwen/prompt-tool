@@ -577,7 +577,26 @@ pub fn run_sync(app: &AppHandle, direction: &str) -> Result<SyncReport, String> 
         return Err(ERR_SYNC_BUSY.into());
     }
     let _guard = SyncGuard;
-    run_sync_inner(app, direction)
+    let result = run_sync_inner(app, direction);
+    // lastSyncAt 记账收口在 run_sync 这一处：merge/push/pull 三条内部路径
+    // 只管数据本身，成功统一盖章，失败保持原值
+    let mut store = lock(app);
+    stamp_last_sync(&mut store, &result)?;
+    drop(store);
+    result
+}
+
+/// 同步收尾记账：成功 → lastSyncAt=当前毫秒并落盘；失败 → 原值不动、不落盘。
+/// 抽成不依赖 AppHandle 的 Store 操作，便于对成功/失败两分支做单元测试
+fn stamp_last_sync(
+    store: &mut crate::store::Store,
+    result: &Result<SyncReport, String>,
+) -> Result<(), String> {
+    if result.is_ok() {
+        store.data.settings.last_sync_at = Some(crate::models::now_ms() as i64);
+        store.save()?;
+    }
+    Ok(())
 }
 
 fn run_sync_inner(app: &AppHandle, direction: &str) -> Result<SyncReport, String> {
@@ -917,6 +936,22 @@ mod tests {
     }
 
     #[test]
+    fn merge_restored_clipboard_item_survives_tombstones_both_ways() {
+        // 评审 R1 回归：撤销清空后，恢复条目的 copied_at 已刷新为恢复时刻
+        // （晚于 clear 留下的墓碑 at）。merge 收尾 retain 与远端墓碑回灌
+        // 都不得把刚恢复的条目判删——撤销不能被同步静默回退
+        let mut local = AppData::default();
+        local.clipboard.push(text_clip("c1", "恢复的条目", 1_000));
+        local.tombstones.push(Tombstone { id: "c1".into(), at: 500 });
+        // 远端也带着 clear 上传的墓碑回来
+        let remote = payload(vec![], vec![], vec![], vec![Tombstone { id: "c1".into(), at: 500 }]);
+        let (_, _, removed) = merge(&mut local, &remote);
+        assert_eq!(removed, 0, "copied_at 晚于墓碑 at 的恢复条目不得被重删");
+        assert_eq!(local.clipboard.len(), 1);
+        assert_eq!(local.clipboard[0].content, "恢复的条目");
+    }
+
+    #[test]
     fn merge_clipboard_last_writer_wins_by_copied_at() {
         let mut local = AppData::default();
         local.clipboard.push(text_clip("c1", "本地旧", 100));
@@ -1012,6 +1047,54 @@ mod tests {
             .upload(&payload(vec![], vec![big], vec![], vec![]))
             .unwrap_err();
         assert!(err.contains("超过 9MB"), "实际错误: {err}");
+    }
+
+    // ---------- lastSyncAt 盖章：成功写 / 失败不写 ----------
+
+    #[test]
+    fn stamp_last_sync_writes_timestamp_and_persists_on_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = crate::store::Store::test_store(dir.path());
+        assert!(store.data.settings.last_sync_at.is_none());
+
+        let ok = Ok(SyncReport {
+            added: 1,
+            updated: 2,
+            removed: 0,
+            message: "同步完成".into(),
+        });
+        stamp_last_sync(&mut store, &ok).unwrap();
+
+        let ts = store
+            .data
+            .settings
+            .last_sync_at
+            .expect("同步成功必须写入 lastSyncAt");
+        assert!(ts > 0, "时间戳应为当前毫秒");
+        let saved: AppData =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("data.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved.settings.last_sync_at, Some(ts), "lastSyncAt 必须落盘");
+    }
+
+    #[test]
+    fn stamp_last_sync_keeps_previous_value_and_skips_save_on_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = crate::store::Store::test_store(dir.path());
+        store.data.settings.last_sync_at = Some(42);
+
+        let failed: Result<SyncReport, String> = Err("GitHub Token 无效".into());
+        stamp_last_sync(&mut store, &failed).unwrap();
+
+        assert_eq!(
+            store.data.settings.last_sync_at,
+            Some(42),
+            "同步失败不得改动 lastSyncAt"
+        );
+        assert!(
+            !dir.path().join("data.json").exists(),
+            "同步失败不得触发落盘"
+        );
     }
 
     // ---------- 上传侧剪贴板范围语义（评审 I11 回归守卫） ----------
