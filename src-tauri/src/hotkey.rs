@@ -78,7 +78,6 @@ pub fn trigger_prompt(app: &AppHandle, id: &str) {
     }
 
     // 无变量：记录前台窗口后直接粘贴（面板保持隐藏）
-    #[cfg(windows)]
     {
         let fg = crate::paste::foreground::current();
         let mut store = crate::store::lock(app);
@@ -151,7 +150,6 @@ pub fn show_quick_window(app: &AppHandle) {
 
     // 记录呼出前的前台窗口，供粘贴时恢复焦点
     if !already_visible {
-        #[cfg(windows)]
         {
             let fg = crate::paste::foreground::current();
             let mut store = crate::store::lock(app);

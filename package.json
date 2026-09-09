@@ -1,6 +1,6 @@
 {
   "name": "prompt-tool",
-  "description": "本地优先的跨平台桌面提示词管理工具（Tauri 2 + Vue 3），支持 Windows 与 macOS",
+  "description": "本地优先的 Windows 桌面提示词管理工具（Tauri 2 + Vue 3）",
   "private": true,
   "license": "MIT",
   "version": "1.0.0",
@@ -14,8 +14,7 @@
     "tauri",
     "vue",
     "desktop-app",
-    "windows",
-    "macos"
+    "windows"
   ],
   "author": "baoxinwen",
   "repository": {

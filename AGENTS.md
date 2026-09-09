@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-Prompt Tool：本地优先的跨平台桌面提示词管理工具。前端 Vue 3 + TypeScript + Vite，桌面壳 Tauri 2（Rust），数据保存在本机 `data.json`。
+Prompt Tool：本地优先的 Windows 桌面提示词管理工具。前端 Vue 3 + TypeScript + Vite，桌面壳 Tauri 2（Rust），数据保存在本机 `data.json`。
 
 ## 常用命令
 
