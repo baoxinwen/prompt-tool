@@ -53,4 +53,11 @@ describe('IPC 契约：api.ts ↔ src-tauri 注册表', () => {
     const missing = [...new Set(registered)].filter((c) => !commandFns.has(c));
     expect(missing, `注册了但无实现: ${missing.join(', ')}`).toEqual([]);
   });
+
+  it('清空/撤销命令对两端齐备（clear_history ↔ restore_history）', () => {
+    for (const c of ['clear_history', 'restore_history']) {
+      expect(apiCommands, `api.ts 应调用 ${c}`).toContain(c);
+      expect(registered, `lib.rs 应注册 ${c}`).toContain(c);
+    }
+  });
 });

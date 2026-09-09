@@ -28,7 +28,10 @@ export const api = {
   pasteTextDirect: (text: string) => invoke<void>('paste_text_direct', { text }),
 
   deleteHistoryItem: (id: string) => invoke<void>('delete_history_item', { id }),
-  clearHistory: () => invoke<void>('clear_history'),
+  /** 清空剪贴板历史，返回清空条数（条目进后端 stash 供撤销） */
+  clearHistory: () => invoke<number>('clear_history'),
+  /** 撤销清空：stash 与现存历史按 id 去重合并，返回恢复条数 */
+  restoreHistory: () => invoke<number>('restore_history'),
 
   getImageThumb: (id: string) => invoke<string>('get_image_thumb', { id }),
   pasteImage: (id: string) => invoke<void>('paste_image', { id }),

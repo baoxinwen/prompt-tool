@@ -140,7 +140,13 @@ pub fn sanitize_prompt_hotkeys(data: &mut crate::models::AppData) {
     }
 }
 
-/// 在鼠标当前所在显示器上居中显示快捷面板并聚焦
+/// 面板垂直锚点：工作区上 1/3 —— y = 工作区顶 + max(0, (可用高度 - 面板高度) / 3)。
+/// 面板高于工作区时负余量兜底为 0（贴工作区顶），多屏时工作区顶自带该屏偏移
+fn one_third_top(work_top: i32, work_height: i32, panel_height: i32) -> i32 {
+    work_top + ((work_height - panel_height) / 3).max(0)
+}
+
+/// 在鼠标当前所在显示器的工作区（排除任务栏）上 1/3 处显示快捷面板并聚焦
 pub fn show_quick_window(app: &AppHandle) {
     let Some(win) = app.get_webview_window("main") else {
         eprintln!("[prompt-tool] show_quick_window: main 窗口不存在");
@@ -169,7 +175,12 @@ pub fn show_quick_window(app: &AppHandle) {
             let mp = monitor.position();
             let ms = monitor.size();
             let x = (mp.x + (ms.width as i32 - size.width as i32) / 2).max(mp.x + 8);
-            let y = (mp.y + (ms.height as i32 - size.height as i32) / 3).max(mp.y + 8);
+            // 垂直锚定工作区（排除任务栏）上 1/3；水平与多屏逻辑不变。
+            // size 为当前面板物理高度（随前端 set_panel_height 联动），
+            // .max(mp.y + 8) 保底：极限小屏下面板顶也不贴出屏幕上沿
+            let wa = monitor.work_area();
+            let y = one_third_top(wa.position.y, wa.size.height as i32, size.height as i32)
+                .max(mp.y + 8);
             let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
         }
     } else {
@@ -334,6 +345,27 @@ mod tests {
         data.prompts.push(prompt_with_hotkey("p1", "   ", 7));
         sanitize_prompt_hotkeys(&mut data);
         assert_eq!(data.prompts[0].updated_at, 7, "空快捷键不应触发 updated_at 变化");
+    }
+
+    // ---------- one_third_top：面板垂直定位（工作区上 1/3） ----------
+
+    #[test]
+    fn one_third_top_places_panel_in_upper_third_of_work_area() {
+        // 1040 可用高、520 面板 → (1040-520)/3 = 173
+        assert_eq!(one_third_top(0, 1040, 520), 173);
+        // 面板更小则更靠上：(1040-260)/3 = 260
+        assert_eq!(one_third_top(0, 1040, 260), 260);
+        // 恰好整除：(600-300)/3 = 100
+        assert_eq!(one_third_top(0, 600, 300), 100);
+    }
+
+    #[test]
+    fn one_third_top_keeps_multi_monitor_offset_and_clamps_negative() {
+        // 副屏在上方（工作区顶 y=-1440）：基准点必须跟随该屏
+        assert_eq!(one_third_top(-1440, 1040, 520), -1440 + 173);
+        // 面板高于工作区：负余量兜底为 0，贴工作区顶而非飞出屏幕
+        assert_eq!(one_third_top(0, 400, 640), 0);
+        assert_eq!(one_third_top(60, 400, 640), 60);
     }
 
     // ---------- has_vars：与前端 vars.ts 的行为一致性 ----------
