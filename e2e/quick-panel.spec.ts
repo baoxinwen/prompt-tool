@@ -9,6 +9,10 @@ test("快捷面板启动：列表渲染、首项选中", async ({ page }) => {
   await expect(page.locator(".qp-list .item")).toHaveCount(3);
   await expect(page.locator(".qp-list .item").first()).toHaveClass(/active/);
   await expect(page.locator(".count-all")).toHaveText(/3 项/);
+  // 变量 chip 化：p1 的 {{代码|贴入代码}} 预览渲染为琥珀 chip（只含变量名）
+  await expect(page.locator(".item-preview .var-chip").first()).toHaveText("代码");
+  // 页脚 Enter 提示随选中项手动变量数动态化
+  await expect(page.locator(".qp-foot")).toContainText("填写 1 个变量");
   await page.screenshot({ path: "e2e-artifacts/quick-home.png" });
 });
 
@@ -58,6 +62,19 @@ test("Esc 隐藏面板；Tab 切换到剪贴板模式", async ({ page }) => {
   await page.keyboard.press("Tab");
   await expect(page.locator(".qp-list")).toContainText("暂无剪贴板历史");
   await page.screenshot({ path: "e2e-artifacts/quick-clipboard-empty.png" });
+});
+
+test("剪贴板 tab 分组延伸：复制后历史按时间分组并带类型图标", async ({ page }) => {
+  // 复制无变量项进历史（shim 的 copy_text 会记入剪贴板状态）
+  await page.locator("input.qp-search").fill("翻译");
+  await page.keyboard.press("Shift+Enter");
+  await expect(page.locator(".toast")).toContainText("已复制到剪贴板");
+
+  await page.keyboard.press("Tab");
+  await expect(page.locator(".qp-list .grp").first()).toHaveText("今天");
+  await expect(page.locator(".qp-list .item .kind-ico").first()).toBeVisible();
+  await expect(page.locator(".qp-list .item").first()).toContainText("翻译成英文");
+  await page.screenshot({ path: "e2e-artifacts/quick-clipboard-grouped.png" });
 });
 
 test("右上角按钮打开管理窗口命令", async ({ page }) => {

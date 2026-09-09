@@ -93,12 +93,15 @@ export const tauriShim = (seed: ShimSeed) => {
 
   const persist = () => localStorage.setItem(STORE_KEY, JSON.stringify(state));
   const now = () => Date.now();
+  // 清空撤销的 stash：与真实后端一致只存内存（不进 localStorage，重启即丢）
+  let clipboardStash: any[] = [];
 
   w.__PM_FAKE__ = {
     state,
     /** 把状态重置回初始种子并持久化（测试隔离用） */
     reset: () => {
       Object.assign(state, defaults());
+      clipboardStash = [];
       persist();
     },
     pastes: () => state.pastes,
@@ -162,6 +165,8 @@ export const tauriShim = (seed: ShimSeed) => {
       state.lastClipboard = text;
       state.data.clipboard.unshift({ id: `c${++state.seq}`, content: text, copiedAt: now(), kind: "text" });
       persist();
+      // 与真实后端一致：复制进历史后派发 data-changed（快捷面板据此刷新列表）
+      emitEvent("data-changed");
       return null;
     },
     invoke_paste: ({ text, promptId }) => {
@@ -176,9 +181,22 @@ export const tauriShim = (seed: ShimSeed) => {
       return null;
     },
     clear_history: () => {
+      // 与真实后端一致：被清条目进内存 stash 供撤销，返回清空条数
+      clipboardStash = state.data.clipboard;
       state.data.clipboard = [];
       persist();
-      return null;
+      return clipboardStash.length;
+    },
+    restore_history: () => {
+      // 与真实后端一致：按 id 与现存历史去重（现存优先），copiedAt 最新在前
+      const existing = new Set(state.data.clipboard.map((c: any) => c.id));
+      const restored = clipboardStash.filter((c: any) => !existing.has(c.id));
+      state.data.clipboard = [...state.data.clipboard, ...restored].sort(
+        (a: any, b: any) => b.copiedAt - a.copiedAt,
+      );
+      clipboardStash = [];
+      persist();
+      return restored.length;
     },
     paste_text_direct: ({ text }) => {
       state.pastes.push({ text, promptId: null });

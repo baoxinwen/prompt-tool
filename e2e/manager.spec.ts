@@ -15,7 +15,8 @@ test("新建提示词：填写保存后入列，重启（reload）后仍在", as
   await page.locator(".pp-head button", { hasText: "新建" }).click();
   await page.locator("input.d-title").fill("E2E 冒烟提示词");
   await page.locator("textarea.d-content").fill("这是端到端测试创建的内容");
-  await page.locator(".d-foot .save-btn").click();
+  // 底栏已无保存按钮（M5 自动保存）：Ctrl+S 立即保存
+  await page.keyboard.press("Control+s");
 
   await expect(page.locator(".toast")).toHaveText(/已保存/);
   await expect(page.locator(".pitem", { hasText: "E2E 冒烟提示词" })).toHaveCount(1);
@@ -29,7 +30,7 @@ test("新建提示词：填写保存后入列，重启（reload）后仍在", as
 test("编辑已有提示词并保存，重启后保留修改", async ({ page }) => {
   await page.locator(".pitem", { hasText: "翻译助手" }).click();
   await page.locator("input.d-title").fill("翻译助手（英译）");
-  await page.locator(".d-foot .save-btn").click();
+  await page.keyboard.press("Control+s");
   await expect(page.locator(".toast")).toHaveText(/已保存/);
 
   await page.reload();

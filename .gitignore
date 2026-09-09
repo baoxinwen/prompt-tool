@@ -55,3 +55,6 @@ md-header-v54.txt
 
 # 更新签名私钥（永不入库）
 *.key
+
+# SDD 工作区草稿
+.superpowers/
