@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Cloud, RefreshCw, UploadCloud, DownloadCloud, Eye, EyeOff } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import { managerKey } from '../lib/context';
@@ -31,6 +31,9 @@ const status = ref('');
 const statusOk = ref(true);
 const formDirty = ref(false);
 const syncClipboard = ref(false);
+// 用户是否手动编辑过 Gist ID 输入框：未编辑时该字段始终跟随后端，
+// 防止保存时把后端自动回填的 gist_id 覆盖回空串（评审 I12）
+const gistIdDirty = ref(false);
 
 const providerOptions = [
   { id: 'webdav', label: 'WebDAV' },
@@ -39,6 +42,11 @@ const providerOptions = [
 
 function markDirty() {
   formDirty.value = true;
+}
+
+function onGistIdInput() {
+  markDirty();
+  gistIdDirty.value = true;
 }
 
 function fillFrom(s: import('../types').Settings) {
@@ -50,6 +58,7 @@ function fillFrom(s: import('../types').Settings) {
   davAutoSync.value = s.webdav.autoSync;
   token.value = s.gist.token;
   gistId.value = s.gist.gistId;
+  gistIdDirty.value = false;
   gistEnabled.value = s.gist.enabled;
   gistAutoSync.value = s.gist.autoSync;
   syncClipboard.value = s.syncClipboard ?? false;
@@ -63,6 +72,18 @@ watch(
   },
   { immediate: true },
 );
+
+// 后端首次同步自动创建 Gist 后，会把 id 写回 settings 并推 data-changed。
+// 表单脏时上面的 fillFrom 被跳过，但 gistId 是服务端分配值必须始终跟随后端，
+// 否则用户随后保存会用表单里的空串覆盖后端 id，导致重复创建 Gist（评审 I12）
+watch(ctx.data, (d) => {
+  if (d && !gistIdDirty.value) gistId.value = d.settings.gist.gistId;
+});
+
+// 表单有未保存修改时不允许被切换标签静默丢弃（评审 I9），
+// 守卫由 Manager.switchTab 在离开本页前消费
+onMounted(() => ctx.setLeaveGuard(() => !formDirty.value));
+onBeforeUnmount(() => ctx.setLeaveGuard(null));
 
 function switchProvider(p: string) {
   provider.value = p as 'webdav' | 'gist';
@@ -92,6 +113,7 @@ async function save(silent = false): Promise<boolean> {
       },
     });
     formDirty.value = false;
+    gistIdDirty.value = false;
     await ctx.refresh();
     if (!silent) ctx.toast('同步配置已保存');
     return true;
@@ -316,7 +338,7 @@ const providerOn = computed(() =>
             type="text"
             placeholder="自动创建后回填显示"
             spellcheck="false"
-            @input="markDirty"
+            @input="onGistIdInput"
           />
         </label>
         <label class="row opt">
@@ -349,7 +371,7 @@ const providerOn = computed(() =>
 
       <div class="note faint">
         「立即同步 / 仅上传 / 仅下载」会先自动保存当前表单配置。
-        凭据仅保存在本机（data.json），不会随数据上传。
+        凭据仅保存在本机的系统凭据管理器（Windows 凭据管理器），不会随数据上传。
       </div>
     </div>
   </div>

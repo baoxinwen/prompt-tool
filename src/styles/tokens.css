@@ -99,8 +99,10 @@
   --border-strong: rgba(255, 255, 255, 0.14);
   --text: #efede6;
   --text-2: #b8b4a7;
-  --muted: #8b877a;
-  --faint: #605d51;
+  /* muted/faint 提亮至对 panel-2（最浅常用面）仍 ≥ 4.5:1（WCAG AA，评审 I8），
+     且保持 text-2 > muted > faint 的清晰度层级单调 */
+  --muted: #9a9585;
+  --faint: #8f8b7b;
 
   /* 功能色（语义，小面积使用） */
   --danger: #e08a80;
@@ -170,9 +172,11 @@
   --lt-border: rgba(32, 30, 25, 0.09);
   --lt-border-strong: rgba(32, 30, 25, 0.17);
   --lt-text: var(--ink-900);
-  --lt-text-2: var(--ink-500);
-  --lt-muted: var(--ink-400);
-  --lt-faint: var(--ink-300);
+  /* text-2/muted/faint 加深至对 paper-50（亮色页底）仍 ≥ 4.5:1（WCAG AA，评审 I8），
+     层级单调：text-2(#55524a) > muted(ink-500) > faint(#747066) */
+  --lt-text-2: #55524a;
+  --lt-muted: var(--ink-500);
+  --lt-faint: #747066;
 
   --lt-danger: var(--signal-red);
   --lt-danger-btn: var(--signal-red);

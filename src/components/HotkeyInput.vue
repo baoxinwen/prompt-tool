@@ -8,10 +8,29 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>();
 
 const capturing = ref(false);
 
+/** Shift 按下时标点键的 e.key 是变体符号（? : ~ < > 等），
+ *  Rust 侧 global-hotkey 解析器只认基础符号（/ . , ; 等，见其 parse_key 支持表）；
+ *  按 e.code 归一成基础符号，既可注册又保持 KeyCap 显示直观（评审 I4） */
+const PUNCT_BY_CODE: Record<string, string> = {
+  Slash: '/',
+  Period: '.',
+  Comma: ',',
+  Semicolon: ';',
+  Quote: "'",
+  Backslash: '\\',
+  BracketLeft: '[',
+  BracketRight: ']',
+  Minus: '-',
+  Equal: '=',
+  Backquote: '`',
+};
+
 function onCaptureKeydown(e: KeyboardEvent) {
   if (!capturing.value) return;
   e.preventDefault();
   e.stopPropagation();
+  // 输入法组合态的按键（keyCode 229 / key 为 Process）不是快捷键意图（评审 I2）
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === 'Escape') {
     capturing.value = false;
     return;
@@ -30,6 +49,7 @@ function onCaptureKeydown(e: KeyboardEvent) {
   let key = e.key;
   // 数字键用 e.code 归一：Shift+数字时 e.key 是符号（如 !），accelerator 无法注册
   if (/^Digit[0-9]$/.test(e.code)) key = e.code.slice(5);
+  else if (PUNCT_BY_CODE[e.code]) key = PUNCT_BY_CODE[e.code];
   else if (/^Key[A-Z]$/.test(e.code)) key = e.code.slice(3);
   else if (/^[a-z]$/i.test(key)) key = key.toUpperCase();
   else if (/^F\d{1,2}$/.test(key)) key = key.toUpperCase();

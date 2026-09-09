@@ -4,7 +4,7 @@ defineProps<{ disabled?: boolean }>();
 </script>
 
 <template>
-  <button class="ab" :disabled="disabled">
+  <button class="ab" type="button" :disabled="disabled">
     <slot />
   </button>
 </template>

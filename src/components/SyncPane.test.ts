@@ -41,6 +41,8 @@ function makeCtx(settings: Settings) {
   let refreshes = 0;
   let confirmResult = true;
   const confirmCalls: string[] = [];
+  // 离开守卫（评审 I9）：记录注册/注销供断言
+  let leaveGuard: (() => boolean) | null = null;
   const ctx = {
     data: ref<AppData | null>({ settings } as unknown as AppData),
     refresh: async () => {
@@ -53,9 +55,13 @@ function makeCtx(settings: Settings) {
       confirmCalls.push(opts.title);
       return confirmResult;
     },
+    setLeaveGuard: (g: (() => boolean) | null) => {
+      leaveGuard = g;
+    },
     toasts,
     refreshCount: () => refreshes,
     confirmCalls,
+    leaveGuard: () => leaveGuard,
     setConfirm(v: boolean) {
       confirmResult = v;
     },
@@ -235,5 +241,56 @@ describe('SyncPane：云同步设置', () => {
 
     expect(ctx.toasts[ctx.toasts.length - 1]).toMatchObject({ kind: 'err' });
     expect(mockedApi.syncNow).not.toHaveBeenCalled();
+  });
+
+  // ---------- 评审 I6/I9/I12 ----------
+
+  it('凭据存储说明与实现一致：不声称存于 data.json（评审 I6）', async () => {
+    const { wrapper } = await mountPane();
+    const note = wrapper.find('.note').text();
+    expect(note).not.toContain('data.json');
+    expect(note).toContain('凭据管理器');
+  });
+
+  it('挂载注册离开守卫：表单脏时不可静默离开，卸载注销（评审 I9）', async () => {
+    const { wrapper, ctx } = await mountPane();
+    const guard = (ctx as unknown as { leaveGuard: () => (() => boolean) | null }).leaveGuard();
+    expect(guard).toBeTypeOf('function');
+    // 表单干净：可离开
+    expect(guard!()).toBe(true);
+    // 改动表单后：守卫拦截
+    await inputByLabel(wrapper, '服务器地址').setValue('https://dirty.example.com/dav/');
+    expect(guard!()).toBe(false);
+    // 卸载后注销，不影响其它页
+    wrapper.unmount();
+    expect(
+      (ctx as unknown as { leaveGuard: () => (() => boolean) | null }).leaveGuard(),
+    ).toBeNull();
+  });
+
+  it('后端自动创建 Gist 回填 id：表单脏时不被保存回滚成空（评审 I12）', async () => {
+    const settings = JSON.parse(JSON.stringify(baseSettings)) as Settings;
+    settings.syncProvider = 'gist';
+    settings.gist.gistId = '';
+    const { wrapper, ctx } = await mountPane(settings);
+    // 用户改动了表单（脏），随后自动同步在后端创建了 Gist 并写回 settings
+    await inputByLabel(wrapper, 'GitHub Token').setValue('ghp_new');
+    ctx.data.value = {
+      version: 1,
+      seeded: true,
+      settings: { ...JSON.parse(JSON.stringify(settings)), gist: { ...settings.gist, gistId: 'gistNEW' } },
+      categories: [],
+      prompts: [],
+      clipboard: [],
+      tombstones: [],
+    } as AppData;
+    await flushPromises();
+
+    // gistId 输入框跟随后端回填
+    expect((inputByLabel(wrapper, 'Gist ID').element as HTMLInputElement).value).toBe('gistNEW');
+    // 保存不再把后端的 gist_id 覆盖回空串
+    await wrapper.find('.btns button').trigger('click');
+    await flushPromises();
+    expect(mockedApi.saveSettings.mock.calls[0][0].gist.gistId).toBe('gistNEW');
   });
 });

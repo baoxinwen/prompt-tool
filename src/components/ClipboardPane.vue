@@ -354,7 +354,8 @@ onBeforeUnmount(() => {
   transition: opacity var(--t-fast);
 }
 
-.row-item:hover .ops {
+.row-item:hover .ops,
+.row-item:focus-within .ops {
   opacity: 1;
 }
 

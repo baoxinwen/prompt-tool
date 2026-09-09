@@ -168,7 +168,21 @@ button:disabled {
 }
 
 .switch input {
-  display: none;
+  /* 不能 display:none：checkbox 会被移出键盘焦点序列，开关完全无法
+     键盘操作（评审 I7，WCAG 2.1.1）。视觉隐藏但铺满开关区域保留可聚焦性 */
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* 键盘聚焦时焦点环打在轨道上（input 本身 opacity:0） */
+.switch input:focus-visible + .track {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 .switch .track {

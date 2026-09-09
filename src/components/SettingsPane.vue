@@ -2,6 +2,7 @@
 import { inject, onMounted, ref } from 'vue';
 import { Monitor, Moon, Sun, FolderOpen, Keyboard, Palette, RefreshCw, SlidersHorizontal } from 'lucide-vue-next';
 import { api } from '../lib/api';
+import { enqueueSettingsSave } from '../lib/settingsSave';
 import { managerKey } from '../lib/context';
 import HotkeyInput from './HotkeyInput.vue';
 import UpdateSection from './UpdateSection.vue';
@@ -39,17 +40,21 @@ async function load() {
 }
 
 async function saveSettingsPart(mutate: (s: import('../types').Settings) => void, okMsg: string) {
-  const s = ctx.data.value?.settings;
-  if (!s) return;
-  try {
-    const next = JSON.parse(JSON.stringify(s)) as import('../types').Settings;
-    mutate(next);
-    await api.saveSettings(next);
-    await ctx.refresh();
-    ctx.toast(okMsg);
-  } catch (e) {
-    ctx.toast(String(e), 'err');
-  }
+  // 串行化：两次快速变更交叠时，后发者必须等前一次 refresh 完成后再读快照，
+  // 否则会用旧快照整体写回，把已持久化的变更静默回滚（评审 I3）
+  await enqueueSettingsSave(async () => {
+    const s = ctx.data.value?.settings;
+    if (!s) return;
+    try {
+      const next = JSON.parse(JSON.stringify(s)) as import('../types').Settings;
+      mutate(next);
+      await api.saveSettings(next);
+      await ctx.refresh();
+      ctx.toast(okMsg);
+    } catch (e) {
+      ctx.toast(String(e), 'err');
+    }
+  });
 }
 
 function onHotkeyChange(v: string) {

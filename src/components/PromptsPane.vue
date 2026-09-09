@@ -40,7 +40,12 @@ const newCatName = ref('');
 const addingCat = ref(false);
 const editingCat = ref('');
 const editName = ref('');
+// v-for 内的字符串 ref 会被收集成数组（focus 调用会抛 TypeError），
+// 用函数 ref 拿到单个输入框；同一时刻至多一个分类处于重命名态
 const renameInput = ref<HTMLInputElement | null>(null);
+function setRenameInput(el: unknown) {
+  renameInput.value = (el as HTMLInputElement | null) ?? null;
+}
 const searchInput = ref<HTMLInputElement | null>(null);
 
 const allPrompts = computed(() => ctx.data.value?.prompts ?? []);
@@ -211,7 +216,6 @@ function startRename(name: string) {
   editName.value = name;
   nextTick(() => renameInput.value?.focus());
 }
-
 async function saveRename(oldName: string) {
   if (editingCat.value !== oldName) return;
   editingCat.value = '';
@@ -224,6 +228,23 @@ async function saveRename(oldName: string) {
   } catch (e) {
     ctx.toast(String(e), 'err');
   }
+}
+
+/** 输入法组合态的 Enter/Esc 是候选词上屏/取消，不得提交/关闭编辑器（评审 I2） */
+function isComposingEvent(e: KeyboardEvent): boolean {
+  return e.isComposing || e.keyCode === 229;
+}
+
+function onRenameKeydown(e: KeyboardEvent, oldName: string) {
+  if (isComposingEvent(e)) return;
+  if (e.key === 'Enter') saveRename(oldName);
+  else if (e.key === 'Escape') editingCat.value = '';
+}
+
+function onAddCategoryKeydown(e: KeyboardEvent) {
+  if (isComposingEvent(e)) return;
+  if (e.key === 'Enter') addCategory();
+  else if (e.key === 'Escape') addingCat.value = false;
 }
 
 async function deleteCategory(name: string) {
@@ -319,12 +340,11 @@ function fmtTime(ts: number) {
           <template v-for="c in categories" :key="c">
             <input
               v-if="editingCat === c"
-              ref="renameInput"
+              :ref="setRenameInput"
               v-model="editName"
               class="chip-input"
               placeholder="新名称，回车确认"
-              @keydown.enter="saveRename(c)"
-              @keydown.esc="editingCat = ''"
+              @keydown="onRenameKeydown($event, c)"
               @blur="saveRename(c)"
             />
             <button
@@ -350,8 +370,7 @@ function fmtTime(ts: number) {
             v-model="newCatName"
             class="chip-input"
             placeholder="分类名，回车确认"
-            @keydown.enter="addCategory"
-            @keydown.esc="addingCat = false"
+            @keydown="onAddCategoryKeydown"
           />
         </div>
 

@@ -29,7 +29,7 @@ async function importData() {
   try {
     const r = await api.importData();
     if (r.message !== '已取消') {
-      ctx.toast(r.message, r.added > 0 ? 'ok' : 'err');
+      ctx.toast(r.message, r.message.includes('失败') ? 'err' : 'ok');
       await ctx.refresh();
     }
   } catch (e) {
@@ -42,7 +42,7 @@ async function importData() {
 async function importDropped(paths: string[]) {
   try {
     const r = await api.importPaths(paths);
-    ctx.toast(r.message, r.added > 0 ? 'ok' : 'err');
+    ctx.toast(r.message, r.message.includes('失败') ? 'err' : 'ok');
     await ctx.refresh();
   } catch (e) {
     ctx.toast(String(e), 'err');

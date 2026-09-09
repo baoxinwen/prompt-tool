@@ -44,6 +44,35 @@ describe('HotkeyInput：快捷键录制', () => {
     wrapper.unmount();
   });
 
+  it('Ctrl+Shift+标点按 e.code 归一为基础符号（? → /），注册器可解析（评审 I4）', async () => {
+    const wrapper = mount(HotkeyInput, { props: { modelValue: '' }, attachTo: document.body });
+    await wrapper.find('button.sm').trigger('click');
+    // Shift 按下时 e.key 是变体符号 '?'，必须归一成基础符号 '/'（global-hotkey 只认后者）
+    window.dispatchEvent(keyEvent({ key: '?', code: 'Slash', ctrlKey: true, shiftKey: true }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted('update:modelValue')![0]).toEqual(['ctrl+shift+/']);
+    wrapper.unmount();
+  });
+
+  it('Shift+句点归一为 base 符号（> → period 的 .）', async () => {
+    const wrapper = mount(HotkeyInput, { props: { modelValue: '' }, attachTo: document.body });
+    await wrapper.find('button.sm').trigger('click');
+    window.dispatchEvent(keyEvent({ key: '>', code: 'Period', ctrlKey: true, shiftKey: true }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted('update:modelValue')![0]).toEqual(['ctrl+shift+.']);
+    wrapper.unmount();
+  });
+
+  it('输入法组合态按键不进入录制（评审 I2）', async () => {
+    const wrapper = mount(HotkeyInput, { props: { modelValue: '' }, attachTo: document.body });
+    await wrapper.find('button.sm').trigger('click');
+    window.dispatchEvent(keyEvent({ key: 'j', code: 'KeyJ', ctrlKey: true, isComposing: true }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+    expect(document.querySelector('.cap-mask')).toBeTruthy();
+    wrapper.unmount();
+  });
+
   it('仅 Shift 修饰不满足绑定要求（必须 Alt/Ctrl/Super）', async () => {
     const wrapper = mount(HotkeyInput, { props: { modelValue: '' }, attachTo: document.body });
     await wrapper.find('button.sm').trigger('click');

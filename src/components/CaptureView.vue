@@ -59,6 +59,8 @@ function closeWindow() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // 输入法组合态的 Esc 是取消候选词，不是关闭窗口（评审 I2）
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === 'Escape') {
     e.preventDefault();
     closeWindow();
@@ -74,6 +76,9 @@ let unlistenData: (() => void) | undefined;
 onMounted(async () => {
   await load();
   titleInput.value?.focus();
+  // 键盘语义挂 window 而非组件根元素：点击非可聚焦区后焦点落 body，
+  // keydown 不经过组件子树，Esc/Ctrl+S 会静默失效（评审 I5）
+  window.addEventListener('keydown', onKeydown);
   unlistenText = await listen<string>('capture-text', (e) => {
     reset(e.payload ?? '');
     titleInput.value?.focus();
@@ -81,13 +86,14 @@ onMounted(async () => {
   unlistenData = await listen('data-changed', load);
 });
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown);
   unlistenText?.();
   unlistenData?.();
 });
 </script>
 
 <template>
-  <div class="cv" @keydown="onKeydown">
+  <div class="cv">
     <div class="cv-head">
       <span class="cv-logo"><Zap :size="12" :stroke-width="2.4" /></span>
       <span class="cv-title">快速捕获</span>

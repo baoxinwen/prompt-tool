@@ -3,6 +3,7 @@ import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue';
 import { RefreshCw } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import { lastAutoUpdate } from '../lib/updateCache';
+import { enqueueSettingsSave } from '../lib/settingsSave';
 import { managerKey } from '../lib/context';
 import type { Settings, UpdateProgress, UpdateStatus } from '../types';
 
@@ -71,17 +72,22 @@ async function install() {
 }
 
 async function skip() {
+  const available = info.value;
   const s = ctx.data.value?.settings as Settings | undefined;
-  if (!info.value || !s) return;
-  const next = JSON.parse(JSON.stringify(s)) as Settings;
-  next.skippedUpdateVersion = info.value.version;
-  try {
-    await api.saveSettings(next);
-    await ctx.refresh();
-    ctx.toast(`已跳过 v${info.value.version}，设置页仍可随时更新`);
-  } catch (e) {
-    ctx.toast(String(e), 'err');
-  }
+  if (!available || !s) return;
+  // 与 SettingsPane 共用串行化队列：避免与其它设置保存交叠时互相回滚（评审 I3）
+  await enqueueSettingsSave(async () => {
+    const next = JSON.parse(JSON.stringify(ctx.data.value?.settings)) as Settings | undefined;
+    if (!next) return;
+    next.skippedUpdateVersion = available.version;
+    try {
+      await api.saveSettings(next);
+      await ctx.refresh();
+      ctx.toast(`已跳过 v${available.version}，设置页仍可随时更新`);
+    } catch (e) {
+      ctx.toast(String(e), 'err');
+    }
+  });
 }
 
 const openReleases = () => api.openReleasesPage().catch((e) => ctx.toast(String(e), 'err'));

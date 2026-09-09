@@ -105,7 +105,7 @@ function toast(msg: string, kind: 'ok' | 'err' = 'ok', action?: ToastAction, ms?
   );
 }
 
-/** 离开提示词页的守卫（由 PromptsPane 注册）：返回 false = 有未保存草稿 */
+/** 离开当前页的守卫（由已挂载的页组件注册，如 PromptsPane/SyncPane）：返回 false = 有未保存修改 */
 const leaveGuard = ref<(() => boolean) | null>(null);
 function setLeaveGuard(guard: (() => boolean) | null) {
   leaveGuard.value = guard;
@@ -113,14 +113,15 @@ function setLeaveGuard(guard: (() => boolean) | null) {
 
 type TabId = (typeof tabs)[number]['id'];
 
-/** 切换标签页。从提示词页离开前先过守卫：有未保存草稿时弹确认，
- *  静默卸载会把用户未保存的标题/内容/快捷键修改无提示丢掉（评审 I6） */
+/** 切换标签页。离开前先过当前页的守卫：有未保存修改时弹确认，
+ *  静默卸载会把未保存的表单输入无提示丢掉。守卫对任意页生效——
+ *  SyncPane 的连接配置同样是"未保存即丢"（评审 I9） */
 async function switchTab(target: TabId) {
   if (target === tab.value) return;
-  if (tab.value === 'prompts' && leaveGuard.value && !leaveGuard.value()) {
+  if (leaveGuard.value && !leaveGuard.value()) {
     const ok = await confirm({
       title: '有未保存的修改',
-      message: '离开「提示词」页将丢失未保存的修改，确定离开吗？',
+      message: '离开当前页将丢失未保存的修改，确定离开吗？',
       confirmText: '丢弃并离开',
       danger: true,
     });
@@ -208,6 +209,7 @@ onBeforeUnmount(() => {
   unlisten?.();
   unlistenSync?.();
   clearTimeout(updateTimer);
+  clearTimeout(toastTimer);
 });
 
 const tabs = [

@@ -208,6 +208,37 @@ describe('PromptsPane：提示词管理', () => {
     wrapper.unmount();
   });
 
+  it('分类重命名输入框：输入法组合态 Enter 不提交（评审 I2）', async () => {
+    const { wrapper } = await mountPane();
+    const chip = wrapper.findAll('.cat-row .chip').find((c) => c.text().includes('开发'))!;
+    await chip.find('.chip-ops svg').trigger('click');
+    const input = wrapper.find('input.chip-input');
+    expect(input.exists()).toBe(true);
+    await input.setValue('开发改');
+    // 组合态 Enter：拼音上屏候选词，不得提交（此刻 editName 还是旧名，提交会静默丢失编辑）
+    await input.trigger('keydown', { key: 'Enter', isComposing: true });
+    expect(mockedApi.renameCategory).not.toHaveBeenCalled();
+    // 正常 Enter 提交
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+    expect(mockedApi.renameCategory).toHaveBeenCalledWith('开发', '开发改');
+    wrapper.unmount();
+  });
+
+  it('新建分类输入框：输入法组合态 Enter 不提交（评审 I2）', async () => {
+    const { wrapper } = await mountPane();
+    await wrapper.find('.chip-add').trigger('click');
+    const input = wrapper.find('input.chip-input');
+    expect(input.exists()).toBe(true);
+    await input.setValue('新分类');
+    await input.trigger('keydown', { key: 'Enter', isComposing: true });
+    expect(mockedApi.addCategory).not.toHaveBeenCalled();
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+    expect(mockedApi.addCategory).toHaveBeenCalledWith('新分类');
+    wrapper.unmount();
+  });
+
   it('新建提示词：空白草稿，保存时无 id', async () => {
     const { wrapper } = await mountPane();
     await wrapper.findAll('button').find((b) => b.text().includes('新建'))!.trigger('click');
