@@ -75,8 +75,32 @@ fn collect_response(result: Result<ureq::Response, ureq::Error>) -> Result<HttpR
             let body = read_body(r, status)?;
             Ok(HttpResponse { status, body, scopes })
         }
-        Err(e) => Err(format!("网络请求失败: {e}")),
+        Err(e) => Err(redact_url_credentials(&format!("网络请求失败: {e}"))),
     }
+}
+
+/// 脱敏错误文本中 URL 的 userinfo（http://user:pass@host → http://***@host）。
+/// WebDAV 地址内嵌凭据是常见习惯，而 ureq 传输错误的 Display 携带请求 URL，
+/// 不脱敏会随 eprintln 日志与 sync-done 事件进入 stderr 和前端状态条（评审 I13）
+fn redact_url_credentials(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(pos) = rest.find("://") {
+        out.push_str(&rest[..pos + 3]);
+        rest = &rest[pos + 3..];
+        let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+        let authority = &rest[..end];
+        match authority.rsplit_once('@') {
+            Some((_userinfo, host)) if !host.is_empty() => {
+                out.push_str("***@");
+                out.push_str(host);
+            }
+            _ => out.push_str(authority),
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 // ---------- WebDAV 后端 ----------
@@ -453,6 +477,20 @@ fn select_backend(settings: &Settings) -> Result<SyncBackend, String> {
     }
 }
 
+/// 剪贴板同步范围语义（评审 I11）：sync_clipboard=false 时剪贴板是
+/// 「不同步范围」，上传侧必须保留云端既有剪贴板——上传载荷此时为空数组，
+/// 而 WebDAV PUT / Gist PATCH 是单文件整体替换语义，直接上传会静默清空
+/// 云端剪贴板副本（与下载方向 r.clipboard.clear() 的保护不对称）。
+/// 云端尚无数据（remote=None）时保持空数组即可
+fn apply_clipboard_scope(payload: &mut SyncPayload, remote: Option<&SyncPayload>, sync_clipboard: bool) {
+    if sync_clipboard {
+        return;
+    }
+    if let Some(r) = remote {
+        payload.clipboard = r.clipboard.clone();
+    }
+}
+
 /// 条目级合并：内容按 updated_at 取新者；使用统计（use_count/last_used_at）
 /// 单调收敛取 max——它们的变化不 bump updated_at，不能参与 LWW，否则
 /// 一端的使用计数永远传不到另一端，且会被另一端的内容编辑整体覆盖。
@@ -555,6 +593,11 @@ fn run_sync_inner(app: &AppHandle, direction: &str) -> Result<SyncReport, String
 
     match direction {
         "push" => {
+            // 关闭剪贴板同步时先取云端既有剪贴板填入载荷，避免空数组
+            // 借整体替换语义清空云端副本（评审 I11）；云端无数据则保持为空
+            let mut payload = payload;
+            let remote_for_scope = backend.fetch()?;
+            apply_clipboard_scope(&mut payload, remote_for_scope.as_ref(), sync_clipboard);
             let new_gist = backend.upload(&payload)?;
             persist_new_gist_id(app, new_gist)?;
             // 上传期间若有新变更，保持 dirty，让下个自动同步周期补传
@@ -630,10 +673,13 @@ fn run_sync_inner(app: &AppHandle, direction: &str) -> Result<SyncReport, String
                 None => (0, 0, 0, "云端暂无数据，已上传本机数据".to_string()),
             };
             // 上传放在锁外，避免网络请求阻塞剪贴板监听等持锁方
-            let (merged, merged_mark) = {
+            let (mut merged, merged_mark) = {
                 let store = lock(app);
                 (SyncPayload::from(&store.data), store.mutations)
             };
+            // 关闭剪贴板同步时上传侧保留云端既有剪贴板，与下载方向的
+            // 保护对称（评审 I11）
+            apply_clipboard_scope(&mut merged, remote.as_ref(), sync_clipboard);
             let new_gist = backend.upload(&merged)?;
             persist_new_gist_id(app, new_gist)?;
             {
@@ -966,5 +1012,47 @@ mod tests {
             .upload(&payload(vec![], vec![big], vec![], vec![]))
             .unwrap_err();
         assert!(err.contains("超过 9MB"), "实际错误: {err}");
+    }
+
+    // ---------- 上传侧剪贴板范围语义（评审 I11 回归守卫） ----------
+
+    #[test]
+    fn clipboard_out_of_scope_preserves_remote_clipboard_on_upload() {
+        let mut local = payload(vec![], vec![], vec![], vec![]);
+        let remote = payload(vec![], vec![], vec![text_clip("c1", "云端剪贴", 1)], vec![]);
+        apply_clipboard_scope(&mut local, Some(&remote), false);
+        assert_eq!(local.clipboard.len(), 1, "关闭开关时上传必须保留云端剪贴板，而非以空覆盖");
+
+        // 开关打开：本机剪贴板照常上传
+        let mut local2 = payload(vec![], vec![], vec![text_clip("l1", "本机", 2)], vec![]);
+        apply_clipboard_scope(&mut local2, Some(&remote), true);
+        assert_eq!(local2.clipboard[0].id, "l1");
+
+        // 云端尚无数据：保持空数组
+        let mut local3 = payload(vec![], vec![], vec![], vec![]);
+        apply_clipboard_scope(&mut local3, None, false);
+        assert!(local3.clipboard.is_empty());
+    }
+
+    // ---------- 错误文本脱敏（评审 I13 回归守卫） ----------
+
+    #[test]
+    fn error_text_redacts_url_userinfo() {
+        assert_eq!(
+            redact_url_credentials(
+                "网络请求失败: error sending request for url (http://user:pass@dav.example.com/dav/prompt-tool-sync.json)"
+            ),
+            "网络请求失败: error sending request for url (http://***@dav.example.com/dav/prompt-tool-sync.json)"
+        );
+        // 多个 URL、无 userinfo 的 URL、纯域名、无 URL 的文本
+        assert_eq!(
+            redact_url_credentials("http://a:b@h1/x http://h2/y"),
+            "http://***@h1/x http://h2/y"
+        );
+        assert_eq!(
+            redact_url_credentials("token=abc https://user@host end"),
+            "token=abc https://***@host end"
+        );
+        assert_eq!(redact_url_credentials("没有 URL 的普通错误"), "没有 URL 的普通错误");
     }
 }
