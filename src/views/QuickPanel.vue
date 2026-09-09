@@ -11,7 +11,7 @@ import {
 } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import { filterClipboard, filterPrompts, formatTime, preview, highlightSegs } from '../lib/search';
-import { hasManualVars } from '../lib/vars';
+import { hasManualVars, applyClipboardVar } from '../lib/vars';
 import { computePanelHeight } from '../lib/panelHeight';
 import { categoryColor } from '../lib/categoryColor';
 import { useImageThumbs } from '../lib/thumbs';
@@ -145,22 +145,23 @@ function syncHeight() {
 }
 
 /** {{clipboard}} 自动变量：粘贴/复制前用当前剪贴板文本填充。
- *  与 vars.ts 的 VAR_RE 语法对齐：允许带提示写法 {{clipboard|提示}} */
-function clipboardVarRe(): RegExp {
-  return /\{\{\s*clipboard(?:\s*\|[^{}]*)?\s*\}\}/gi;
-}
+ *  占位符语法与替换逻辑统一在 vars.ts（applyClipboardVar） */
 async function fillClipboardVar(text: string): Promise<string> {
-  if (!clipboardVarRe().test(text)) return text;
+  if (!clipboardVarHasMatch(text)) return text;
   let clip: string | null;
   try {
     clip = await api.getClipboardText();
   } catch (e) {
     // 读取失败 ≠ 剪贴板为空：文案必须区分，否则用户会误以为剪贴板被清空
     showToast(`读取剪贴板失败（${e}），{{clipboard}} 已留空`, 'err');
-    return text.replace(clipboardVarRe(), '');
+    return applyClipboardVar(text, '');
   }
   if (!clip) showToast('剪贴板为空，{{clipboard}} 已留空', 'err');
-  return text.replace(clipboardVarRe(), clip ?? '');
+  return applyClipboardVar(text, clip);
+}
+
+function clipboardVarHasMatch(text: string): boolean {
+  return /\{\{\s*clipboard(?:\s*\|[^{}]*)?\s*\}\}/i.test(text);
 }
 
 async function doPaste(text: string, promptId?: string) {
@@ -230,6 +231,9 @@ function activate(item: Prompt | ClipboardItem, copyOnly: boolean) {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // 输入法组合态（候选词上屏/取消）派发的 Enter/Esc 不能当作面板快捷键，
+  // 否则拼音选词会把选中提示词粘进上一个前台窗口（评审 C1）
+  if (e.isComposing || e.keyCode === 229) return;
   if (varDialogPrompt.value) return;
   if (detailOpen.value) {
     // 全文浮层打开时：Esc / ← 关闭，其余不响应

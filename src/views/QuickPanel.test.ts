@@ -265,6 +265,39 @@ describe('QuickPanel：快捷面板', () => {
     wrapper.unmount();
   });
 
+  it('输入法组合态的 Enter/Esc 不触发面板快捷键（评审 C1）', async () => {
+    const wrapper = await mountPanel();
+    // 组合态 Enter：拼音上屏候选词，不得误判为「粘贴」
+    await wrapper.find('.qp').trigger('keydown', { key: 'Enter', isComposing: true });
+    await flushPromises();
+    expect(mockedApi.invokePaste).not.toHaveBeenCalled();
+    expect(mockedApi.copyText).not.toHaveBeenCalled();
+
+    // 组合态 Esc：取消候选词，不得隐藏面板
+    await wrapper.find('.qp').trigger('keydown', { key: 'Escape', isComposing: true });
+    await flushPromises();
+    expect(mockedApi.hideQuick).not.toHaveBeenCalled();
+
+    // 非组合态行为不受影响（对照）
+    await wrapper.find('.qp').trigger('keydown', { key: 'Escape' });
+    await flushPromises();
+    expect(mockedApi.hideQuick).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it('{{clipboard}} 剪贴板含 $&/$$/派生替换序列时按字面填充（评审 C2）', async () => {
+    mockedApi.getClipboardText.mockResolvedValue("awk '{print $$}'");
+    const data: AppData = {
+      ...fixture,
+      prompts: [makePrompt({ id: 'pc2', title: 'sed 片段', content: 'run {{clipboard}}' })],
+    };
+    const wrapper = await mountPanel(data);
+    await wrapper.find('.qp').trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+    expect(mockedApi.invokePaste).toHaveBeenCalledWith("run awk '{print $$}'", 'pc2');
+    wrapper.unmount();
+  });
+
   it('Tab 切换到剪贴板模式并渲染历史', async () => {
     const wrapper = await mountPanel();
     await wrapper.find('.qp').trigger('keydown', { key: 'Tab' });

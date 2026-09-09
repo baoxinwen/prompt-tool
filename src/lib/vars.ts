@@ -37,7 +37,23 @@ export function hasManualVars(content: string): boolean {
 export function applyVars(content: string, values: Record<string, string>): string {
   return content.replace(VAR_RE, (match, rawName: string) => {
     const name = String(rawName).trim();
-    if (isAutoVar(name) && !(name in values)) return match;
+    // 只认自有键：变量名是用户可控的（如 __proto__），
+    // `in`/直接取值会沿原型链读到 Object.prototype 被字符串化成 "[object Object]"
+    if (!Object.prototype.hasOwnProperty.call(values, name)) {
+      return isAutoVar(name) ? match : '';
+    }
     return values[name] ?? '';
   });
+}
+
+/** {{clipboard}} 自动变量的占位符正则：允许带提示写法 {{clipboard|提示}} */
+export function clipboardVarRe(): RegExp {
+  return /\{\{\s*clipboard(?:\s*\|[^{}]*)?\s*\}\}/gi;
+}
+
+/** 用剪贴板文本填充 {{clipboard}} 占位符。
+ *  必须用函数作替换参数：字符串替换里 `$&`/`$'`/`$`/`$$` 有特殊语义，
+ *  剪贴板里的 shell/awk 片段会被静默改写（评审 C2，与 applyVars 同陷阱） */
+export function applyClipboardVar(text: string, clip: string | null): string {
+  return text.replace(clipboardVarRe(), () => clip ?? '');
 }

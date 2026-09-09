@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractVars, hasVars, hasManualVars, isAutoVar, applyVars } from './vars';
+import { extractVars, hasVars, hasManualVars, isAutoVar, applyVars, applyClipboardVar } from './vars';
 
 describe('extractVars：变量提取', () => {
   it('按出现顺序提取，重复变量去重且首个 hint 获胜', () => {
@@ -97,5 +97,34 @@ describe('applyVars：变量替换', () => {
 
   it('无变量的文本原样返回', () => {
     expect(applyVars('普通文本', { a: 'b' })).toBe('普通文本');
+  });
+
+  it('变量名命中原型链键名（__proto__）且值表无自有键时，替换为空串而非原型对象（评审 C3）', () => {
+    // 复现 VarDialog 的实际路径：reactive 普通对象上 values['__proto__'] = 'x'
+    // 的赋值被原型访问器吞掉，自有键永远建不出来
+    const values: Record<string, string> = {};
+    values['__proto__'] = 'HELLO';
+    expect(applyVars('A={{__proto__}}', values)).toBe('A=');
+  });
+
+  it('变量名 __proto__ 存在自有键时正常替换', () => {
+    const values: Record<string, string> = JSON.parse('{"__proto__":"HELLO"}');
+    expect(applyVars('A={{__proto__}}', values)).toBe('A=HELLO');
+  });
+});
+
+describe('applyClipboardVar：{{clipboard}} 填充（评审 C2）', () => {
+  it('剪贴板文本含 $& / $` / $\' / $$ 等替换序列时按字面填充，不被展开', () => {
+    expect(applyClipboardVar('run: {{clipboard}}', "awk '{print $&}'")).toBe("run: awk '{print $&}'");
+    expect(applyClipboardVar('{{clipboard}}', "a $$ b $& c $' d $` e")).toBe("a $$ b $& c $' d $` e");
+    expect(applyClipboardVar('x {{clipboard|提示}} y', '$`')).toBe('x $` y');
+  });
+
+  it('剪贴板为空（null）时占位符替换为空串', () => {
+    expect(applyClipboardVar('a{{clipboard}}b', null)).toBe('ab');
+  });
+
+  it('无占位符的文本原样返回', () => {
+    expect(applyClipboardVar('普通文本', '剪贴内容')).toBe('普通文本');
   });
 });

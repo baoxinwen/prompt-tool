@@ -16,7 +16,10 @@ const emit = defineEmits<{
 const fields = computed<VarField[]>(() =>
   extractVars(props.prompt.content).filter((f) => !isAutoVar(f.name)),
 );
-const values = reactive<Record<string, string>>({});
+// 值表必须用无原型对象：变量名是用户可控的（如 __proto__），
+// 普通对象上 values['__proto__'] = x 的赋值会被原型访问器吞掉，
+// 值静默丢失且读取沿原型链得到 "[object Object]"（评审 C3）
+const values = reactive<Record<string, string>>(Object.create(null));
 const inputEls: HTMLElement[] = [];
 
 function varChip(name: string) {
@@ -44,7 +47,7 @@ function confirm() {
   // 保存变量值记忆（未保存的新提示词没有 id，跳过）。
   // 持久化失败不能静默丢弃：至少留日志，否则用户下次发现记忆失效无从排查
   if (props.prompt.id && fields.value.length) {
-    const snap: Record<string, string> = {};
+    const snap: Record<string, string> = Object.create(null);
     for (const f of fields.value) snap[f.name] = values[f.name] ?? '';
     api.saveVarMemory(props.prompt.id, snap).catch((e) => {
       console.error('[prompt-tool] 变量记忆保存失败:', e);
@@ -53,6 +56,8 @@ function confirm() {
 }
 
 function onKeydown(e: KeyboardEvent, index: number) {
+  // 输入法组合态的 Enter/Esc 是候选词上屏/取消，不是表单快捷键（评审 I2）
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     confirm();

@@ -80,6 +80,25 @@ describe('VarDialog：变量填写表单', () => {
     expect(wrapper.emitted('cancel')).toHaveLength(1);
   });
 
+  it('输入法组合态的 Enter/Esc 是候选词操作，不触发确认/取消（评审 I2）', async () => {
+    const wrapper = await mountDialog();
+    const area = wrapper.findAll('textarea')[0];
+    await area.trigger('keydown', { key: 'Enter', isComposing: true });
+    expect(wrapper.emitted('confirm')).toBeUndefined();
+    await area.trigger('keydown', { key: 'Escape', isComposing: true });
+    expect(wrapper.emitted('cancel')).toBeUndefined();
+  });
+
+  it('变量名为 __proto__ 时填写的值正常替换，不得变成 [object Object]（评审 C3）', async () => {
+    const wrapper = await mountDialog(
+      makePrompt({ content: '你好 {{__proto__}}，来自 {{city}}' }),
+    );
+    await wrapper.findAll('textarea')[0].setValue('小明');
+    await wrapper.find('.vd-foot button').trigger('click');
+    const evt = wrapper.emitted('confirm')![0][0] as string;
+    expect(evt).toBe('你好 小明，来自 ');
+  });
+
   it('点击遮罩与返回按钮都会取消', async () => {
     const wrapper = await mountDialog();
     await wrapper.find('.vd-mask').trigger('mousedown');
