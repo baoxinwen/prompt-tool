@@ -73,14 +73,15 @@ pub fn delete_files(app: &tauri::AppHandle, id: &str) {
 }
 
 /// 判断文件名是否为「无引用孤儿」：仅认 `<id>.png` / `<id>_t.png` 命名
-/// （id 限 uuid 字符集），其余文件一律不动；id 在引用集合中则保留
+/// （id 限 uuid 字符集），其余文件一律不动；引用集合存主图文件名
+/// （`<id>.png`，与 ImageRef.file 同形），主图有引用则连同缩略图一起保留
 fn orphan_id(name: &str, referenced: &HashSet<String>) -> Option<String> {
     let base = name.strip_suffix(".png")?;
     let id = base.strip_suffix("_t").unwrap_or(base);
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
         return None;
     }
-    (!referenced.contains(id)).then(|| id.to_string())
+    (!referenced.contains(&format!("{id}.png"))).then(|| id.to_string())
 }
 
 /// 启动对账：删除 images/ 下没有被任何剪贴板图片条目引用的孤儿文件。
@@ -134,7 +135,8 @@ mod tests {
         ] {
             touch(dir.path(), &name);
         }
-        let referenced: HashSet<String> = [a.clone(), b.clone()].into();
+        // 引用集合与生产同形：lib.rs 收集的是 ImageRef.file，即「<id>.png」文件名
+        let referenced: HashSet<String> = [format!("{a}.png"), format!("{b}.png")].into();
 
         let removed = gc_orphans_in(dir.path(), &referenced);
 
@@ -154,8 +156,50 @@ mod tests {
         let a = uuid(5);
         touch(dir.path(), &format!("{a}.png"));
         touch(dir.path(), &format!("{a}_t.png"));
-        let referenced: HashSet<String> = [a].into();
+        let referenced: HashSet<String> = [format!("{a}.png")].into();
         assert_eq!(gc_orphans_in(dir.path(), &referenced), 0);
+    }
+
+    #[test]
+    // 回归边界（真机裂图根因）：引用集合是「<id>.png」文件名形状时，
+    // 在用图片的主图与缩略图都必须在启动对账后存活
+    fn gc_keeps_referenced_pair_with_production_file_shape() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = uuid(6);
+        touch(dir.path(), &format!("{a}.png"));
+        touch(dir.path(), &format!("{a}_t.png"));
+        let referenced: HashSet<String> = [format!("{a}.png")].into();
+        assert_eq!(gc_orphans_in(dir.path(), &referenced), 0);
+        assert!(dir.path().join(format!("{a}.png")).exists());
+        assert!(dir.path().join(format!("{a}_t.png")).exists());
+    }
+
+    #[test]
+    fn gc_removes_pair_when_nothing_referenced() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = uuid(7);
+        touch(dir.path(), &format!("{a}.png"));
+        touch(dir.path(), &format!("{a}_t.png"));
+        assert_eq!(gc_orphans_in(dir.path(), &HashSet::new()), 2);
+    }
+
+    #[test]
+    fn orphan_id_matches_reference_by_main_image_file_name() {
+        let id = uuid(8);
+        let referenced: HashSet<String> = [format!("{id}.png")].into();
+        assert!(
+            orphan_id(&format!("{id}.png"), &referenced).is_none(),
+            "主图文件名在引用集合中则不删"
+        );
+        assert!(
+            orphan_id(&format!("{id}_t.png"), &referenced).is_none(),
+            "缩略图随主图保留"
+        );
+        assert_eq!(
+            orphan_id(&format!("{id}.png"), &HashSet::new()).as_deref(),
+            Some(id.as_str()),
+            "引用集合不含其主图时判为孤儿"
+        );
     }
 
     #[test]
