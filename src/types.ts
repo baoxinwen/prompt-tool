@@ -71,6 +71,8 @@ export interface Settings {
   autoUpdateCheck?: boolean;
   /** 用户跳过的更新版本（只抑制启动提示） */
   skippedUpdateVersion?: string | null;
+  /** 最近一次云同步成功的毫秒时间戳（后端 run_sync 成功后写入，失败保持原值） */
+  lastSyncAt?: number | null;
 }
 
 export interface AppData {

@@ -6,15 +6,15 @@ export interface CategoryColor {
 }
 
 const PALETTE: { main: string; soft: string }[] = [
-  { main: '#a85b4b', soft: 'rgba(168, 91, 75, 0.13)' },
+  { main: '#bd6a58', soft: 'rgba(189, 106, 88, 0.13)' },
   { main: '#6e7f4f', soft: 'rgba(110, 127, 79, 0.13)' },
-  { main: '#4e7a6a', soft: 'rgba(78, 122, 106, 0.13)' },
+  { main: '#5e9480', soft: 'rgba(94, 148, 128, 0.13)' },
   { main: '#b08d3f', soft: 'rgba(176, 141, 63, 0.13)' },
-  { main: '#7a6656', soft: 'rgba(122, 102, 86, 0.13)' },
+  { main: '#8d7966', soft: 'rgba(141, 121, 102, 0.13)' },
   { main: '#4f7d7b', soft: 'rgba(79, 125, 123, 0.13)' },
-  { main: '#9c5f72', soft: 'rgba(156, 95, 114, 0.13)' },
+  { main: '#b06f84', soft: 'rgba(176, 111, 132, 0.13)' },
   { main: '#5c6e52', soft: 'rgba(92, 110, 82, 0.13)' },
-  { main: '#8a6d3b', soft: 'rgba(138, 109, 59, 0.13)' },
+  { main: '#a07e46', soft: 'rgba(160, 126, 70, 0.13)' },
   { main: '#667a8c', soft: 'rgba(102, 122, 140, 0.13)' },
 ];
 
