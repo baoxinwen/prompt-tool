@@ -122,91 +122,134 @@ fn import_dispatch(
 }
 
 // ---------- 数据读取 / 提示词 ----------
+// 落盘类命令一律 async + spawn_blocking：非 async 命令会在 UI 主线程内联执行，
+// 其内部 Store::save 是全量序列化 + fsync + 备份 + 改名，数据量大或磁盘慢时
+// 卡顿主线程、延迟窗口事件（评审 I10）。export/import/sync 已是该范式
 
-#[tauri::command]
-pub fn get_data(app: AppHandle) -> AppData {
-    lock(&app).data.clone()
+/// get_data 按调用窗口脱敏凭据（评审 rc-M9）：管理窗口需要完整设置
+///（同步表单回显/保存依赖凭据字段）；快捷面板与捕获窗不读也不写凭据，
+/// 返回前清空明文，收敛凭据暴露面。window 由 Tauri 自动注入（同 invoke_paste）
+fn redact_credentials(mut data: AppData) -> AppData {
+    data.settings.webdav.password = String::new();
+    data.settings.gist.token = String::new();
+    data
 }
 
 #[tauri::command]
-pub fn save_prompt(app: AppHandle, prompt: Prompt) -> Result<(), String> {
-    hotkey::validate_prompt_hotkey(&app, &prompt.id, &prompt.hotkey)?;
-    let mut store = lock(&app);
-    store.mutate(|d| upsert_prompt(d, prompt.clone()))?;
-    drop(store);
-    // 注册失败要回传给用户：数据已保存（上面 mutate 已落盘），但快捷键按下无反应，
-    // 静默失败会让用户以为绑定成功而无法自助排查
-    let failed = hotkey::register_all(&app);
-    if !prompt.hotkey.trim().is_empty() && failed.iter().any(|a| *a == hotkey::normalize(&prompt.hotkey)) {
-        emit_data_changed(&app);
-        return Err(format!(
-            "提示词已保存，但独立快捷键 {} 注册失败（可能被其他程序占用），按下不会生效",
-            prompt.hotkey
-        ));
+pub fn get_data(app: AppHandle, window: WebviewWindow) -> AppData {
+    let data = lock(&app).data.clone();
+    if window.label() == "manager" {
+        data
+    } else {
+        redact_credentials(data)
     }
-    emit_data_changed(&app);
-    Ok(())
 }
 
 #[tauri::command]
-pub fn delete_prompt(app: AppHandle, id: String) -> Result<(), String> {
-    {
+pub async fn save_prompt(app: AppHandle, prompt: Prompt) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        hotkey::validate_prompt_hotkey(&app, &prompt.id, &prompt.hotkey)?;
+        let mut store = lock(&app);
+        store.mutate(|d| upsert_prompt(d, prompt.clone()))?;
+        drop(store);
+        // 注册失败要回传给用户：数据已保存（上面 mutate 已落盘），但快捷键按下无反应，
+        // 静默失败会让用户以为绑定成功而无法自助排查
+        let failed = hotkey::register_all(&app);
+        if !prompt.hotkey.trim().is_empty()
+            && failed.iter().any(|a| *a == hotkey::normalize(&prompt.hotkey))
+        {
+            emit_data_changed(&app);
+            return Err(format!(
+                "提示词已保存，但独立快捷键 {} 注册失败（可能被其他程序占用），按下不会生效",
+                prompt.hotkey
+            ));
+        }
+        emit_data_changed(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn delete_prompt(app: AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        {
+            let mut store = lock(&app);
+            store.mutate(|d| {
+                d.prompts.retain(|p| p.id != id);
+                d.tombstone(&id);
+            })?;
+        }
+        hotkey::register_all(&app);
+        emit_data_changed(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn record_prompt_use(app: AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
         let mut store = lock(&app);
         store.mutate(|d| {
-            d.prompts.retain(|p| p.id != id);
-            d.tombstone(&id);
+            if let Some(p) = d.prompts.iter_mut().find(|p| p.id == id) {
+                p.use_count += 1;
+                p.last_used_at = now_ms();
+            }
         })?;
-    }
-    hotkey::register_all(&app);
-    emit_data_changed(&app);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn record_prompt_use(app: AppHandle, id: String) -> Result<(), String> {
-    let mut store = lock(&app);
-    store.mutate(|d| {
-        if let Some(p) = d.prompts.iter_mut().find(|p| p.id == id) {
-            p.use_count += 1;
-            p.last_used_at = now_ms();
-        }
-    })?;
-    emit_data_changed(&app);
-    Ok(())
+        emit_data_changed(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ---------- 分类 ----------
 
 #[tauri::command]
-pub fn add_category(app: AppHandle, name: String) -> Result<(), String> {
+pub async fn add_category(app: AppHandle, name: String) -> Result<(), String> {
     let name = name.trim().to_string();
     if name.is_empty() {
         return Err("分类名不能为空".into());
     }
-    let mut store = lock(&app);
-    store.mutate(|d| d.ensure_category(&name))?;
-    emit_data_changed(&app);
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut store = lock(&app);
+        store.mutate(|d| d.ensure_category(&name))?;
+        emit_data_changed(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn rename_category(app: AppHandle, old_name: String, new_name: String) -> Result<(), String> {
+pub async fn rename_category(app: AppHandle, old_name: String, new_name: String) -> Result<(), String> {
     let new_name = new_name.trim().to_string();
-    let mut store = lock(&app);
-    validate_category_rename(&store.data, &new_name)?;
-    store.mutate(|d| apply_category_rename(d, &old_name, &new_name))?;
-    drop(store);
-    emit_data_changed(&app);
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut store = lock(&app);
+        validate_category_rename(&store.data, &new_name)?;
+        store.mutate(|d| apply_category_rename(d, &old_name, &new_name))?;
+        drop(store);
+        emit_data_changed(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn delete_category(app: AppHandle, name: String) -> Result<(), String> {
-    let mut store = lock(&app);
-    store.mutate(|d| delete_category_in(d, &name))?;
-    drop(store);
-    emit_data_changed(&app);
-    Ok(())
+pub async fn delete_category(app: AppHandle, name: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut store = lock(&app);
+        store.mutate(|d| delete_category_in(d, &name))?;
+        drop(store);
+        emit_data_changed(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ---------- 剪贴板 / 粘贴 ----------
@@ -238,22 +281,27 @@ pub fn copy_text(app: AppHandle, text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn invoke_paste(
+pub async fn invoke_paste(
     app: AppHandle,
     window: WebviewWindow,
     text: String,
     prompt_id: Option<String>,
 ) -> Result<(), String> {
-    if let Some(id) = prompt_id {
-        let mut store = lock(&app);
-        let _ = store.mutate(|d| {
-            if let Some(p) = d.prompts.iter_mut().find(|p| p.id == id) {
-                p.use_count += 1;
-                p.last_used_at = now_ms();
-            }
-        });
-    }
-    paste::paste_to_previous_window(&window, &app, &text)
+    // 用量记账走全量落盘，不得阻塞 UI 主线程（评审 I10）
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(id) = prompt_id {
+            let mut store = lock(&app);
+            let _ = store.mutate(|d| {
+                if let Some(p) = d.prompts.iter_mut().find(|p| p.id == id) {
+                    p.use_count += 1;
+                    p.last_used_at = now_ms();
+                }
+            });
+        }
+        paste::paste_to_previous_window(&window, &app, &text)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -276,28 +324,34 @@ pub fn get_var_memory(
 }
 
 #[tauri::command]
-pub fn save_var_memory(
+pub async fn save_var_memory(
     app: tauri::AppHandle<Wry>,
     prompt_id: String,
     values: std::collections::BTreeMap<String, String>,
 ) -> Result<(), String> {
-    crate::var_memory::save_var_memory(app, prompt_id, values)
+    tauri::async_runtime::spawn_blocking(move || crate::var_memory::save_var_memory(app, prompt_id, values))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 // ---------- 剪贴板图片 ----------
 
 #[tauri::command]
-pub fn get_image_thumb(app: AppHandle, id: String) -> Result<String, String> {
-    let file = lock(&app)
-        .data
-        .clipboard
-        .iter()
-        .find(|i| i.id == id)
-        .and_then(|i| i.image.as_ref())
-        .map(|im| im.file.clone())
-        .ok_or("图片不存在")?;
-    let bytes = crate::images::read_png(&app, &crate::images::thumb_name(&file))?;
-    Ok(crate::images::png_base64(&bytes))
+pub async fn get_image_thumb(app: AppHandle, id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let file = lock(&app)
+            .data
+            .clipboard
+            .iter()
+            .find(|i| i.id == id)
+            .and_then(|i| i.image.as_ref())
+            .map(|im| im.file.clone())
+            .ok_or("图片不存在")?;
+        let bytes = crate::images::read_png(&app, &crate::images::thumb_name(&file))?;
+        Ok(crate::images::png_base64(&bytes))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// 找到剪贴板图片条目并解码为 RGBA（paste_image / copy_image 共用）
@@ -330,116 +384,132 @@ fn set_clipboard_image(rgba: &image::RgbaImage) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn paste_image(app: AppHandle, window: WebviewWindow, id: String) -> Result<(), String> {
-    let rgba = load_image_rgba(&app, &id)?;
+pub async fn paste_image(app: AppHandle, window: WebviewWindow, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let rgba = load_image_rgba(&app, &id)?;
 
-    let generation = {
-        let mut store = lock(&app);
-        store.suppress_clipboard = true;
-        // 使更早的写入会话收尾失效（同 paste_text/copy_text 范式）：
-        // 旧会话不得恢复剪贴板覆盖本会话写入的图片，也不得提前解除抑制
-        store.paste_generation += 1;
-        store.paste_generation
-    };
-    // 写入失败必须解除抑制，否则剪贴板历史从此静默失效直到重启
-    if let Err(e) = set_clipboard_image(&rgba) {
-        lock(&app).suppress_clipboard = false;
-        return Err(e);
-    }
+        let generation = {
+            let mut store = lock(&app);
+            store.suppress_clipboard = true;
+            // 使更早的写入会话收尾失效（同 paste_text/copy_text 范式）：
+            // 旧会话不得恢复剪贴板覆盖本会话写入的图片，也不得提前解除抑制
+            store.paste_generation += 1;
+            store.paste_generation
+        };
+        // 写入失败必须解除抑制，否则剪贴板历史从此静默失效直到重启
+        if let Err(e) = set_clipboard_image(&rgba) {
+            lock(&app).suppress_clipboard = false;
+            return Err(e);
+        }
 
-    let _ = window.hide();
-    let append_enter = lock(&app).data.settings.paste_append_enter;
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        let target = lock(&handle).paste_target.take();
-        paste::send_paste(target, append_enter);
-        // 与其他写入路径共用抑制窗口；代际未变才解除，避免把程序自己
-        // 写入/粘贴的内容误记进剪贴板历史（评审 I2）
-        std::thread::sleep(crate::clipboard::SUPPRESS_WINDOW);
-        lock(&handle).release_suppress_if_current(generation);
-    });
-    Ok(())
+        let _ = window.hide();
+        let append_enter = lock(&app).data.settings.paste_append_enter;
+        let handle = app.clone();
+        std::thread::spawn(move || {
+            let target = lock(&handle).paste_target.take();
+            paste::send_paste(target, append_enter);
+            // 与其他写入路径共用抑制窗口；代际未变才解除，避免把程序自己
+            // 写入/粘贴的内容误记进剪贴板历史（评审 I2）
+            std::thread::sleep(crate::clipboard::SUPPRESS_WINDOW);
+            lock(&handle).release_suppress_if_current(generation);
+        });
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// 复制图片条目到剪贴板（只复制不粘贴）：快捷面板对图片项按
 /// Shift+Enter 的语义（底栏提示 Shift+Enter=复制），此前静默无操作（评审 M12）
 #[tauri::command]
-pub fn copy_image(app: AppHandle, id: String) -> Result<(), String> {
-    let rgba = load_image_rgba(&app, &id)?;
+pub async fn copy_image(app: AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let rgba = load_image_rgba(&app, &id)?;
 
-    let generation = {
-        let mut store = lock(&app);
-        store.suppress_clipboard = true;
-        // 同 copy_text：程序自己的写入不记入剪贴板历史
-        store.paste_generation += 1;
-        store.paste_generation
-    };
-    if let Err(e) = set_clipboard_image(&rgba) {
-        lock(&app).suppress_clipboard = false;
-        return Err(e);
-    }
-
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(crate::clipboard::SUPPRESS_WINDOW);
-        lock(&handle).release_suppress_if_current(generation);
-    });
-    Ok(())
-}
-
-#[tauri::command]
-pub fn delete_history_item(app: AppHandle, id: String) -> Result<(), String> {
-    let file = {
-        let mut store = lock(&app);
-        let file = store
-            .data
-            .clipboard
-            .iter()
-            .find(|i| i.id == id)
-            .and_then(|i| i.image.as_ref())
-            .map(|im| im.file.clone());
-        store.mutate(|d| {
-            d.clipboard.retain(|i| i.id != id);
-            d.tombstone(&id);
-        })?;
-        file
-    };
-    if let Some(f) = file {
-        if let Some(base) = f.strip_suffix(".png") {
-            crate::images::delete_files(&app, base);
+        let generation = {
+            let mut store = lock(&app);
+            store.suppress_clipboard = true;
+            // 同 copy_text：程序自己的写入不记入剪贴板历史
+            store.paste_generation += 1;
+            store.paste_generation
+        };
+        if let Err(e) = set_clipboard_image(&rgba) {
+            lock(&app).suppress_clipboard = false;
+            return Err(e);
         }
-    }
-    emit_data_changed(&app);
-    Ok(())
+
+        let handle = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(crate::clipboard::SUPPRESS_WINDOW);
+            lock(&handle).release_suppress_if_current(generation);
+        });
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn clear_history(app: AppHandle) -> Result<(), String> {
-    let image_ids: Vec<String> = {
-        let store = lock(&app);
-        store
-            .data
-            .clipboard
-            .iter()
-            .filter(|i| i.is_image())
-            .map(|i| i.id.clone())
-            .collect()
-    };
-    {
-        let mut store = lock(&app);
-        let ids: Vec<String> = store.data.clipboard.iter().map(|i| i.id.clone()).collect();
-        store.mutate(|d| {
-            d.clipboard.clear();
-            for id in ids {
+pub async fn delete_history_item(app: AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let file = {
+            let mut store = lock(&app);
+            let file = store
+                .data
+                .clipboard
+                .iter()
+                .find(|i| i.id == id)
+                .and_then(|i| i.image.as_ref())
+                .map(|im| im.file.clone());
+            store.mutate(|d| {
+                d.clipboard.retain(|i| i.id != id);
                 d.tombstone(&id);
+            })?;
+            file
+        };
+        if let Some(f) = file {
+            if let Some(base) = f.strip_suffix(".png") {
+                crate::images::delete_files(&app, base);
             }
-        })?;
-    }
-    for id in image_ids {
-        crate::images::delete_files(&app, &id);
-    }
-    emit_data_changed(&app);
-    Ok(())
+        }
+        emit_data_changed(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn clear_history(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let image_ids: Vec<String> = {
+            let store = lock(&app);
+            store
+                .data
+                .clipboard
+                .iter()
+                .filter(|i| i.is_image())
+                .map(|i| i.id.clone())
+                .collect()
+        };
+        {
+            let mut store = lock(&app);
+            let ids: Vec<String> = store.data.clipboard.iter().map(|i| i.id.clone()).collect();
+            store.mutate(|d| {
+                d.clipboard.clear();
+                for id in ids {
+                    d.tombstone(&id);
+                }
+            })?;
+        }
+        for id in image_ids {
+            crate::images::delete_files(&app, &id);
+        }
+        emit_data_changed(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ---------- 窗口控制 ----------
@@ -480,40 +550,44 @@ pub fn set_panel_height(app: AppHandle, height: f64) {
 }
 
 #[tauri::command]
-pub fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
-    let (old_hotkey, old_capture_hotkey) = {
-        let store = lock(&app);
-        (
-            store.data.settings.hotkey.clone(),
-            store.data.settings.capture_hotkey.clone(),
-        )
-    };
-    {
-        let mut store = lock(&app);
-        store.mutate(|d| d.settings = settings.clone())?;
-    }
-    // 任一全局快捷键变化都需要重注册
-    if settings.hotkey.trim().to_lowercase() != old_hotkey.trim().to_lowercase()
-        || settings.capture_hotkey.trim().to_lowercase() != old_capture_hotkey.trim().to_lowercase()
-    {
-        let failed = hotkey::register_all(&app);
-        // 只对本次保存涉及的两个键负责：其他提示词键被占用与本次保存无关
-        let relevant: Vec<String> = [settings.hotkey.trim(), settings.capture_hotkey.trim()]
-            .iter()
-            .filter(|k| !k.is_empty())
-            .map(|k| hotkey::normalize(k))
-            .collect();
-        let hit: Vec<&String> = failed.iter().filter(|f| relevant.contains(f)).collect();
-        if !hit.is_empty() {
-            emit_data_changed(&app);
-            return Err(format!(
-                "设置已保存，但快捷键注册失败（可能被其他程序占用）: {}",
-                hit.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("、")
-            ));
+pub async fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (old_hotkey, old_capture_hotkey) = {
+            let store = lock(&app);
+            (
+                store.data.settings.hotkey.clone(),
+                store.data.settings.capture_hotkey.clone(),
+            )
+        };
+        {
+            let mut store = lock(&app);
+            store.mutate(|d| d.settings = settings.clone())?;
         }
-    }
-    emit_data_changed(&app);
-    Ok(())
+        // 任一全局快捷键变化都需要重注册
+        if settings.hotkey.trim().to_lowercase() != old_hotkey.trim().to_lowercase()
+            || settings.capture_hotkey.trim().to_lowercase() != old_capture_hotkey.trim().to_lowercase()
+        {
+            let failed = hotkey::register_all(&app);
+            // 只对本次保存涉及的两个键负责：其他提示词键被占用与本次保存无关
+            let relevant: Vec<String> = [settings.hotkey.trim(), settings.capture_hotkey.trim()]
+                .iter()
+                .filter(|k| !k.is_empty())
+                .map(|k| hotkey::normalize(k))
+                .collect();
+            let hit: Vec<&String> = failed.iter().filter(|f| relevant.contains(f)).collect();
+            if !hit.is_empty() {
+                emit_data_changed(&app);
+                return Err(format!(
+                    "设置已保存，但快捷键注册失败（可能被其他程序占用）: {}",
+                    hit.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("、")
+                ));
+            }
+        }
+        emit_data_changed(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -937,5 +1011,24 @@ mod tests {
         let ts = time_stamp();
         assert_eq!(ts.len(), 8, "应为 YYYYMMDD: {ts}");
         assert!(ts.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    // ---------- get_data 凭据脱敏（评审 rc-M9） ----------
+
+    #[test]
+    fn redact_credentials_clears_password_and_token_only() {
+        let mut d = data_with_prompt();
+        d.settings.webdav.password = "dav-secret".into();
+        d.settings.gist.token = "ghp_secret".into();
+        d.categories.push("开发".into());
+
+        let d = redact_credentials(d);
+
+        assert_eq!(d.settings.webdav.password, "", "WebDAV 密码必须清空");
+        assert_eq!(d.settings.gist.token, "", "Gist Token 必须清空");
+        // 非凭据字段原样保留：提示词、分类、其他设置
+        assert_eq!(d.prompts.len(), 1);
+        assert!(d.categories.contains(&"开发".to_string()));
+        assert_eq!(d.settings.hotkey, Settings::default().hotkey);
     }
 }

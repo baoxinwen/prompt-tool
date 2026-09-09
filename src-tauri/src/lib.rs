@@ -87,7 +87,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        // 首参为启动器选择，仅对非 Windows 平台有意义，传默认值即可
+        // 启动器参数使用默认值
         .plugin(tauri_plugin_autostart::init(Default::default(), None))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -99,6 +99,22 @@ pub fn run() {
             store.data.seed_if_empty();
             store.save()?;
             app.manage(SharedStore::new(store));
+
+            // 图片目录对账：清掉剪贴板历史已无引用的孤儿 PNG
+            //（崩溃残留/数据损坏隔离/.bak 恢复产生，评审 rc-M4）
+            let referenced_images: std::collections::HashSet<String> = {
+                let store = store::lock(&handle);
+                store
+                    .data
+                    .clipboard
+                    .iter()
+                    .filter_map(|i| i.image.as_ref().map(|im| im.file.clone()))
+                    .collect()
+            };
+            let removed = images::gc_orphans_in(&images::dir(&handle), &referenced_images);
+            if removed > 0 {
+                eprintln!("[prompt-tool] 已清理 {removed} 个无引用的孤儿图片文件");
+            }
 
             if !e2e {
                 clipboard::spawn(handle.clone());

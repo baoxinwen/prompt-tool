@@ -137,10 +137,12 @@ impl Store {
         // 凭据先写凭据库、data.json 只落哨兵：凭据写入失败必须放弃落盘，
         // 否则磁盘上是哨兵、凭据库里没有值，重启后凭据就丢了
         let mut payload = self.data.clone();
+        // 锁中毒容错与 store 主锁（lock()）口径一致：cred_memo 曾 panic
+        // 不应让此后每次保存都跟着 panic（评审 M2）
         crate::creds::persist(
             &mut payload,
             self.creds.as_ref(),
-            &mut self.cred_memo.lock().unwrap(),
+            &mut self.cred_memo.lock().unwrap_or_else(|p| p.into_inner()),
         )?;
         let tmp = self.path.with_extension("json.tmp");
         let json = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
