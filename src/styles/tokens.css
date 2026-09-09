@@ -115,6 +115,8 @@
 
   /* 交互 */
   --accent: var(--brand);
+  /* 键帽（kbd）立体面：既有立体键帽做法，颜色来源收敛为语义 token */
+  --kbd-bg: linear-gradient(180deg, #2f2d25 0%, #26251f 100%);
   --input-bg: var(--night-600);
   --input-focus-bg: var(--night-500);
   --scrollbar-thumb: rgba(255, 255, 255, 0.14);
@@ -169,8 +171,8 @@
   --lt-panel-2: var(--paper-100);
   --lt-panel-3: var(--paper-150);
   --lt-panel-glass: rgba(255, 255, 255, 0.92);
-  --lt-border: rgba(32, 30, 25, 0.09);
-  --lt-border-strong: rgba(32, 30, 25, 0.17);
+  --lt-border: rgba(32,30,25,.12);
+  --lt-border-strong: rgba(32,30,25,.22);
   --lt-text: var(--ink-900);
   /* text-2/muted/faint 加深至对 paper-50（亮色页底）仍 ≥ 4.5:1（WCAG AA，评审 I8），
      层级单调：text-2(#55524a) > muted(ink-500) > faint(#747066) */
@@ -188,6 +190,7 @@
 
   --lt-input-bg: var(--paper-0);
   --lt-input-focus-bg: var(--paper-0);
+  --lt-kbd-bg: linear-gradient(180deg, #ffffff 0%, #f3f1ec 100%);
   --lt-scrollbar-thumb: rgba(32, 30, 25, 0.18);
   --lt-scrollbar-thumb-hover: rgba(32, 30, 25, 0.3);
   --lt-mask-bg: rgba(50, 47, 40, 0.35);
@@ -222,6 +225,7 @@
   --text-2: var(--lt-text-2);
   --muted: var(--lt-muted);
   --faint: var(--lt-faint);
+  --var: var(--lt-var);
 
   --danger: var(--lt-danger);
   --danger-btn: var(--lt-danger-btn);
@@ -233,6 +237,7 @@
 
   --input-bg: var(--lt-input-bg);
   --input-focus-bg: var(--lt-input-focus-bg);
+  --kbd-bg: var(--lt-kbd-bg);
   --scrollbar-thumb: var(--lt-scrollbar-thumb);
   --scrollbar-thumb-hover: var(--lt-scrollbar-thumb-hover);
   --mask-bg: var(--lt-mask-bg);
@@ -277,6 +282,7 @@
     --text-2: var(--lt-text-2);
     --muted: var(--lt-muted);
     --faint: var(--lt-faint);
+    --var: var(--lt-var);
 
     --danger: var(--lt-danger);
     --danger-btn: var(--lt-danger-btn);
@@ -288,6 +294,7 @@
 
     --input-bg: var(--lt-input-bg);
     --input-focus-bg: var(--lt-input-focus-bg);
+    --kbd-bg: var(--lt-kbd-bg);
     --scrollbar-thumb: var(--lt-scrollbar-thumb);
     --scrollbar-thumb-hover: var(--lt-scrollbar-thumb-hover);
     --mask-bg: var(--lt-mask-bg);
