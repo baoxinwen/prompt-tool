@@ -10,14 +10,20 @@ import AccentButton from './ui/AccentButton.vue';
 const data = ref<AppData | null>(null);
 const title = ref('');
 const content = ref('');
-const category = ref('未分类');
+// 空串 = 未定：拿到分类列表后回退第一个分类（避免永远落在「未分类」）
+const category = ref('');
 const saving = ref(false);
+const saved = ref(false);
 const saveErr = ref('');
 const titleInput = ref<HTMLInputElement | null>(null);
 
 async function load() {
   try {
     data.value = await api.getData();
+    // 默认分类 = 第一个分类；用户手选后（truthy）不被覆盖，跨次捕获保留
+    if (!category.value) {
+      category.value = data.value?.categories[0] ?? '未分类';
+    }
   } catch {
     /* 忽略 */
   }
@@ -31,7 +37,7 @@ function reset(text: string) {
 }
 
 async function save() {
-  if (saving.value) return;
+  if (saving.value || saved.value) return;
   if (!content.value.trim()) {
     closeWindow();
     return;
@@ -45,7 +51,9 @@ async function save() {
       title: title.value.trim() || content.value.trim().slice(0, 20),
       content: content.value,
     });
-    closeWindow();
+    // 反馈停留约 0.6s 再关窗：本地保存极快，「保存中」一闪而过会被读成「没显示全」
+    saved.value = true;
+    setTimeout(closeWindow, 600);
   } catch (e) {
     // 窗口保持打开，把失败显式告诉用户，避免误以为已保存
     saveErr.value = String(e);
@@ -116,15 +124,22 @@ onBeforeUnmount(() => {
       placeholder="选中文本会自动填到这里，也可手动输入"
       spellcheck="false"
     />
+    <div v-if="saveErr" class="cv-err-row" role="alert">{{ saveErr }}</div>
     <div class="cv-foot">
       <select v-model="category">
         <option v-for="c in data?.categories ?? []" :key="c" :value="c">{{ c }}</option>
         <option value="未分类">未分类</option>
       </select>
-      <span v-if="saveErr" class="cv-err">{{ saveErr }}</span>
       <span class="grow" />
       <button class="ghost-btn" @click="closeWindow()">取消</button>
-      <AccentButton @click="save">保存 <kbd>Ctrl S</kbd></AccentButton>
+      <AccentButton
+        :disabled="saving || saved"
+        title="快捷键：Ctrl+S 或 Ctrl+Enter"
+        @click="save"
+      >
+        {{ saving ? '保存中…' : saved ? '✓ 已保存' : '保存' }}
+        <span v-if="!saving && !saved" class="cv-kbds"><kbd>Ctrl S</kbd></span>
+      </AccentButton>
     </div>
   </div>
 </template>
@@ -199,8 +214,19 @@ onBeforeUnmount(() => {
 .cv-foot {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 8px;
   gap: 8px;
   padding: 0 12px 12px;
+}
+
+.cv-foot > * {
+  flex: none;
+}
+
+/* 弹性占位例外：负责把按钮组推到右侧（修复上面通配的误伤） */
+.cv-foot > .grow {
+  flex: 1 1 auto;
 }
 
 .cv-foot .ab kbd {
@@ -219,18 +245,29 @@ select {
   padding: 5px 8px;
 }
 
+.cv-foot .ab {
+  flex: none;
+}
+
+.cv-foot .ab:disabled {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: transparent;
+}
+
 .ghost-btn {
   background: transparent;
   font-size: 12px;
   color: var(--muted);
 }
 
-.cv-err {
-  font-size: 11px;
+.cv-err-row {
+  margin: 0 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
   color: var(--danger);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
+  user-select: text;
 }
 
 .ghost-btn:hover {

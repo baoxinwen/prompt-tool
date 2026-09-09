@@ -17,10 +17,18 @@ describe('HotkeyInput：快捷键录制', () => {
     expect(caps).toEqual(['Alt', 'Q']);
   });
 
-  it('未设置时显示占位文案', () => {
+  it('未设置时空态显示「未设置 · 点击录制」引导文案', () => {
     const wrapper = mount(HotkeyInput, { props: { modelValue: '' } });
-    expect(wrapper.text()).toContain('未设置');
+    expect(wrapper.find('.key-empty').text()).toBe('未设置 · 点击录制');
     expect(wrapper.find('kbd').exists()).toBe(false);
+  });
+
+  it('点击键位槽整槽进入录制，槽内显示「按下新组合，Esc 取消」', async () => {
+    const wrapper = mount(HotkeyInput, { props: { modelValue: '' }, attachTo: document.body });
+    await wrapper.find('.key-slot').trigger('click');
+    expect(document.querySelector('.cap-mask')).toBeTruthy();
+    expect(wrapper.find('.key-empty').text()).toBe('按下新组合，Esc 取消');
+    wrapper.unmount();
   });
 
   it('点击修改后进入录制态，捕获 Ctrl+J 归一为 e.code 大写键名（由后端 normalize 再转小写注册）', async () => {
@@ -122,9 +130,16 @@ describe('HotkeyInput：快捷键录制', () => {
     wrapper.unmount();
   });
 
-  it('清除按钮发出空值', async () => {
+  it('橡皮擦清除：aria/title=清除快捷键，点击发出空值并回到空态文案', async () => {
     const wrapper = mount(HotkeyInput, { props: { modelValue: 'ctrl+k' } });
-    await wrapper.find('button.ghost').trigger('click');
+    const eraser = wrapper.find('button[aria-label="清除快捷键"]');
+    expect(eraser.exists()).toBe(true);
+    expect(eraser.attributes('title')).toBe('清除快捷键');
+    expect(eraser.find('svg').classes()).toContain('lucide-eraser');
+    expect(eraser.text(), '图标按钮不再用文字 ×').not.toContain('×');
+    await eraser.trigger('click');
     expect(wrapper.emitted('update:modelValue')![0]).toEqual(['']);
+    await wrapper.setProps({ modelValue: '' });
+    expect(wrapper.find('.key-empty').text()).toBe('未设置 · 点击录制');
   });
 });

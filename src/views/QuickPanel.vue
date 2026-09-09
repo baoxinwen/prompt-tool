@@ -8,10 +8,14 @@ import {
   Pin,
   Copy,
   Sparkles,
+  Type as TypeIcon,
+  Image as ImageIcon,
 } from 'lucide-vue-next';
 import { api } from '../lib/api';
-import { filterClipboard, filterPrompts, formatTime, preview, highlightSegs } from '../lib/search';
-import { hasManualVars, applyClipboardVar } from '../lib/vars';
+import { filterClipboard, filterPrompts, formatTime, highlightSegs } from '../lib/search';
+import { hasManualVars, extractVars, isAutoVar } from '../lib/vars';
+import { previewSegments } from '../lib/preview';
+import { TIME_GROUPS, timeGroup, groupTimeLabel, type TimeGroupName } from '../lib/timeGroup';
 import { computePanelHeight } from '../lib/panelHeight';
 import { categoryColor } from '../lib/categoryColor';
 import { useImageThumbs } from '../lib/thumbs';
@@ -76,6 +80,36 @@ const hiddenCount = computed(
   () => (mode.value === 'prompts' ? promptsTotal.value : clipsTotal.value) - items.value,
 );
 const items = computed(() => (mode.value === 'prompts' ? prompts.value.length : clips.value.length));
+
+/** 剪贴板时间分组（今天→更早），与主窗口 ClipboardPane 同规则；
+ *  行携带扁平列表下标 idx，选中态/键盘导航仍走 clips[active] */
+const clipGroups = computed(() => {
+  const buckets = new Map<TimeGroupName, { item: ClipboardItem; idx: number }[]>(
+    TIME_GROUPS.map((g) => [g, []]),
+  );
+  const now = new Date();
+  clips.value.forEach((item, idx) => {
+    buckets.get(timeGroup(item.copiedAt, now))!.push({ item, idx });
+  });
+  return TIME_GROUPS.filter((g) => buckets.get(g)!.length > 0).map((name) => ({
+    name,
+    rows: buckets.get(name)!,
+  }));
+});
+
+/** 页脚 Enter 提示：active 为提示词且有手动变量 → 「填写 N 个变量」
+ *  （N 为去重后的手动变量数，与 activate 弹变量表单的条件 hasManualVars 一致，
+ *  {{clipboard}} 等自动变量直接粘贴故不计入），否则「粘贴」 */
+const enterHint = computed(() => {
+  if (mode.value === 'prompts') {
+    const p = prompts.value[active.value];
+    if (p) {
+      const n = extractVars(p.content).filter((v) => !isAutoVar(v.name)).length;
+      if (n > 0) return `填写 ${n} 个变量`;
+    }
+  }
+  return '粘贴';
+});
 const activeItem = computed(() =>
   mode.value === 'prompts' ? prompts.value[active.value] : clips.value[active.value],
 );
@@ -103,7 +137,11 @@ async function load() {
 watch([query, mode, category], () => {
   active.value = 0;
   detailOpen.value = false;
-  nextTick(() => listEl.value?.scrollTo({ top: 0 }));
+  nextTick(() => {
+    listEl.value?.scrollTo({ top: 0 });
+    // 已在顶部时 scrollTo 不产生 scroll 事件，遮罩须按新内容主动重算
+    updateEdges();
+  });
 });
 
 // 后台剪贴板事件导致列表长度变化时：只收敛越界的选中项，
@@ -112,6 +150,9 @@ watch(items, () => {
   if (active.value >= items.value) {
     active.value = Math.max(0, items.value - 1);
   }
+  // 内容增删（含首次加载）不改 scrollTop 就不会触发 scroll 事件，
+  // fade 遮罩在这里同步重算，避免「已溢出但不显底部渐隐」
+  nextTick(updateEdges);
 });
 
 watch(active, () => {
@@ -145,23 +186,23 @@ function syncHeight() {
 }
 
 /** {{clipboard}} 自动变量：粘贴/复制前用当前剪贴板文本填充。
- *  占位符语法与替换逻辑统一在 vars.ts（applyClipboardVar） */
+ *  与 vars.ts 的 VAR_RE 语法对齐：允许带提示写法 {{clipboard|提示}} */
+function clipboardVarRe(): RegExp {
+  return /\{\{\s*clipboard(?:\s*\|[^{}]*)?\s*\}\}/gi;
+}
 async function fillClipboardVar(text: string): Promise<string> {
-  if (!clipboardVarHasMatch(text)) return text;
+  if (!clipboardVarRe().test(text)) return text;
   let clip: string | null;
   try {
     clip = await api.getClipboardText();
   } catch (e) {
     // 读取失败 ≠ 剪贴板为空：文案必须区分，否则用户会误以为剪贴板被清空
     showToast(`读取剪贴板失败（${e}），{{clipboard}} 已留空`, 'err');
-    return applyClipboardVar(text, '');
+    return text.replace(clipboardVarRe(), () => '');
   }
   if (!clip) showToast('剪贴板为空，{{clipboard}} 已留空', 'err');
-  return applyClipboardVar(text, clip);
-}
-
-function clipboardVarHasMatch(text: string): boolean {
-  return /\{\{\s*clipboard(?:\s*\|[^{}]*)?\s*\}\}/i.test(text);
+  // 函数替换：剪贴板含 $&/$$ 等替换序列时按字面填充，不被 String.replace 展开
+  return text.replace(clipboardVarRe(), () => clip ?? '');
 }
 
 async function doPaste(text: string, promptId?: string) {
@@ -231,8 +272,7 @@ function activate(item: Prompt | ClipboardItem, copyOnly: boolean) {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  // 输入法组合态（候选词上屏/取消）派发的 Enter/Esc 不能当作面板快捷键，
-  // 否则拼音选词会把选中提示词粘进上一个前台窗口（评审 C1）
+  // 输入法组合态的 Enter/Esc 是取消候选词/确认候选，不是面板快捷键（main 62191ed）
   if (e.isComposing || e.keyCode === 229) return;
   if (varDialogPrompt.value) return;
   if (detailOpen.value) {
@@ -313,8 +353,12 @@ onMounted(async () => {
     if (p) varDialogPrompt.value = p;
   });
   // 高度自适应：同时观察根元素（窗口变化）与列表内层（内容变化）——
-  // 窗口被最小高度托底且内容再增长时根元素尺寸不变，只有内层会变
-  resizeObs = new ResizeObserver(syncHeight);
+  // 窗口被最小高度托底且内容再增长时根元素尺寸不变，只有内层会变；
+  // 窗口/内容尺寸变化同样影响 fade 遮罩的临界值，一并重算
+  resizeObs = new ResizeObserver(() => {
+    syncHeight();
+    updateEdges();
+  });
   if (rootEl.value) resizeObs.observe(rootEl.value);
   if (listInnerEl.value) resizeObs.observe(listInnerEl.value);
   syncHeight();
@@ -397,7 +441,10 @@ onBeforeUnmount(() => {
             </span>
           </div>
           <div class="item-preview" :class="{ two: i === active }">
-            {{ preview(p.content, i === active ? 160 : 90) }}
+            <template v-for="(seg, si) in previewSegments(p.content, i === active ? 160 : 90)" :key="si">
+              <span v-if="seg.chip" class="var-chip">{{ seg.t }}</span>
+              <template v-else>{{ seg.t }}</template>
+            </template>
           </div>
         </div>
         <div v-if="hiddenCount > 0" class="truncated muted">
@@ -416,27 +463,40 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else>
-        <div
-          v-for="(c, i) in clips"
-          :key="c.id"
-          class="item"
-          :class="{ active: i === active }"
-          @mouseenter="active = i"
-          @click="activate(c, false)"
-        >
-          <div class="item-line">
-            <span class="item-meta"><span class="faint">{{ formatTime(c.copiedAt) }}</span></span>
+        <template v-for="g in clipGroups" :key="g.name">
+          <div class="grp">{{ g.name }}</div>
+          <div
+            v-for="row in g.rows"
+            :key="row.item.id"
+            class="item"
+            :class="{ active: row.idx === active }"
+            @mouseenter="active = row.idx"
+            @click="activate(row.item, false)"
+          >
+            <div class="item-line">
+              <span class="kind-ico" aria-hidden="true">
+                <ImageIcon v-if="row.item.kind === 'image'" :size="13" />
+                <TypeIcon v-else :size="13" />
+              </span>
+              <span class="item-meta"><span class="faint">{{ groupTimeLabel(row.item.copiedAt) }}</span></span>
+            </div>
+            <img
+              v-if="row.item.kind === 'image' && row.item.image"
+              :src="thumbFor(row.item)"
+              class="item-img"
+              alt="剪贴板图片"
+            />
+            <div v-else class="item-preview" :class="{ two: row.idx === active }">
+              <template
+                v-for="(seg, si) in previewSegments(row.item.content, row.idx === active ? 200 : 100)"
+                :key="si"
+              >
+                <span v-if="seg.chip" class="var-chip">{{ seg.t }}</span>
+                <template v-else>{{ seg.t }}</template>
+              </template>
+            </div>
           </div>
-          <img
-            v-if="c.kind === 'image' && c.image"
-            :src="thumbFor(c)"
-            class="item-img"
-            alt="剪贴板图片"
-          />
-          <div v-else class="item-preview" :class="{ two: i === active }">
-            {{ preview(c.content, i === active ? 200 : 100) }}
-          </div>
-        </div>
+        </template>
         <div v-if="hiddenCount > 0" class="truncated muted">
           还有 {{ hiddenCount }} 条未显示，输入关键词继续筛选
         </div>
@@ -449,7 +509,7 @@ onBeforeUnmount(() => {
 
     <div class="qp-foot">
       <span class="hint"><kbd>↑</kbd><kbd>↓</kbd> 选择</span>
-      <span class="hint"><kbd>Enter</kbd> 粘贴</span>
+      <span class="hint"><kbd>Enter</kbd> {{ enterHint }}</span>
       <span class="hint"><kbd>Shift</kbd><kbd>Enter</kbd> 复制</span>
       <span class="hint"><kbd>→</kbd> 全文</span>
       <span class="hint"><kbd>Tab</kbd> 剪贴板</span>
@@ -744,26 +804,61 @@ onBeforeUnmount(() => {
   color: var(--faint);
 }
 
+/* 预览统一两行截断（与主窗口剪贴板页 .content 同族）；.two 仅表示 active
+   放宽了取字预算，不再有独立截断形态 */
 .item-preview {
   color: var(--muted);
   font-size: 12px;
   margin-top: 4px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.item-preview.two {
-  white-space: normal;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   line-height: 1.5;
+  word-break: break-word;
+}
+
+/* {{变量}} chip：琥珀记号色（--var），两视图同族 */
+.var-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0 5px;
+  margin: 0 1px;
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--var) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--var) 28%, transparent);
+  color: var(--var);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* 剪贴板时间分组头（与主窗口 ClipboardPane .grp 同族） */
+.grp {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--faint);
+  letter-spacing: 0.02em;
+  padding: 10px 4px 0;
+}
+
+/* 类型图标独立列（与主窗口 ClipboardPane .kind-ico 同族） */
+.kind-ico {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
 }
 
 .item-img {
   margin-top: 6px;
   max-height: 120px;
+  /* 大图不横占整行：限宽 420px 或 78%，与列表文本列宽协调 */
+  max-width: min(420px, 78%);
   border-radius: var(--r-xs);
   border: 1px solid var(--border);
 }

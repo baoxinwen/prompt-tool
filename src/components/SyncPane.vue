@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Cloud, RefreshCw, UploadCloud, DownloadCloud, Eye, EyeOff } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import { managerKey } from '../lib/context';
+import { relativeTime } from '../lib/relativeTime';
 import AccentButton from './ui/AccentButton.vue';
 import Segmented from './ui/Segmented.vue';
 
@@ -31,14 +32,73 @@ const status = ref('');
 const statusOk = ref(true);
 const formDirty = ref(false);
 const syncClipboard = ref(false);
-// 用户是否手动编辑过 Gist ID 输入框：未编辑时该字段始终跟随后端，
-// 防止保存时把后端自动回填的 gist_id 覆盖回空串（评审 I12）
-const gistIdDirty = ref(false);
 
 const providerOptions = [
   { id: 'webdav', label: 'WebDAV' },
   { id: 'gist', label: 'GitHub Gist' },
 ];
+
+// ---------- 相对时间：上次同步 + 动作完成回填（30s 定时刷新） ----------
+const nowTick = ref(Date.now());
+let clock: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  clock = setInterval(() => {
+    nowTick.value = Date.now();
+  }, 30_000);
+});
+onUnmounted(() => clearInterval(clock));
+
+function relTime(ts: number) {
+  return relativeTime(ts, new Date(nowTick.value));
+}
+
+const lastSyncLabel = computed(() => {
+  const ts = ctx.data.value?.settings.lastSyncAt;
+  return ts ? `上次同步 · ${relTime(ts)}` : '尚未同步';
+});
+
+const statsLabel = computed(() => {
+  const d = ctx.data.value;
+  return `${d?.prompts?.length ?? 0} 条提示词 · ${d?.clipboard?.length ?? 0} 条剪贴板`;
+});
+
+// ---------- 状态三态：未配置 faint / 已配置·未启用 warn / 已启用 ok ----------
+const providerName = computed(() => (provider.value === 'gist' ? 'GitHub Gist' : 'WebDAV'));
+const providerOn = computed(() =>
+  provider.value === 'gist' ? gistEnabled.value : davEnabled.value,
+);
+// 门槛 = 当前 provider 的必填项非空：webdav → 服务器地址，gist → Token
+const configured = computed(() =>
+  provider.value === 'gist' ? token.value.trim() !== '' : url.value.trim() !== '',
+);
+const state = computed<'on' | 'ready' | 'unset'>(() =>
+  providerOn.value ? 'on' : configured.value ? 'ready' : 'unset',
+);
+const stateLabel = computed(() =>
+  state.value === 'on' ? '已启用' : state.value === 'ready' ? '已配置·未启用' : '未配置',
+);
+
+// 启用/自动同步跟随 provider：同一行开关读写不同后端的配置
+const providerEnabled = computed({
+  get: () => (provider.value === 'gist' ? gistEnabled.value : davEnabled.value),
+  set: (v: boolean) => {
+    if (provider.value === 'gist') gistEnabled.value = v;
+    else davEnabled.value = v;
+    markDirty();
+  },
+});
+const providerAutoSync = computed({
+  get: () => (provider.value === 'gist' ? gistAutoSync.value : davAutoSync.value),
+  set: (v: boolean) => {
+    if (provider.value === 'gist') gistAutoSync.value = v;
+    else davAutoSync.value = v;
+    markDirty();
+  },
+});
+
+// 用户是否手动编辑过 Gist ID 输入框：未编辑时该字段始终跟随后端，
+// 防止保存时把后端自动回填的 gist_id 覆盖回空串（评审 I12）
+const gistIdDirty = ref(false);
 
 function markDirty() {
   formDirty.value = true;
@@ -58,10 +118,10 @@ function fillFrom(s: import('../types').Settings) {
   davAutoSync.value = s.webdav.autoSync;
   token.value = s.gist.token;
   gistId.value = s.gist.gistId;
-  gistIdDirty.value = false;
   gistEnabled.value = s.gist.enabled;
   gistAutoSync.value = s.gist.autoSync;
   syncClipboard.value = s.syncClipboard ?? false;
+  gistIdDirty.value = false;
   formDirty.value = false;
 }
 
@@ -80,14 +140,21 @@ watch(ctx.data, (d) => {
   if (d && !gistIdDirty.value) gistId.value = d.settings.gist.gistId;
 });
 
-// 表单有未保存修改时不允许被切换标签静默丢弃（评审 I9），
-// 守卫由 Manager.switchTab 在离开本页前消费
+// 表单有未保存修改时不允许被切换标签静默丢弃（评审 I9），守卫由 Manager.switchTab 消费
 onMounted(() => ctx.setLeaveGuard(() => !formDirty.value));
 onBeforeUnmount(() => ctx.setLeaveGuard(null));
 
 function switchProvider(p: string) {
   provider.value = p as 'webdav' | 'gist';
   formDirty.value = true;
+}
+
+// ---------- 状态行：动作完成后回填「✓ … · 刚刚」 ----------
+const statusAt = ref(0);
+function setStatus(msg: string, ok: boolean) {
+  status.value = msg;
+  statusOk.value = ok;
+  statusAt.value = Date.now();
 }
 
 async function save(silent = false): Promise<boolean> {
@@ -113,7 +180,6 @@ async function save(silent = false): Promise<boolean> {
       },
     });
     formDirty.value = false;
-    gistIdDirty.value = false;
     await ctx.refresh();
     if (!silent) ctx.toast('同步配置已保存');
     return true;
@@ -131,17 +197,17 @@ async function test() {
       provider.value === 'gist'
         ? await api.gistTest(token.value.trim(), gistId.value.trim())
         : await api.webdavTest(url.value.trim(), username.value.trim(), password.value);
-    statusOk.value = true;
-    status.value = `✓ ${msg}`;
+    setStatus(`✓ ${msg}`, true);
   } catch (e) {
-    statusOk.value = false;
-    status.value = `✗ ${e}`;
+    setStatus(`✗ ${e}`, false);
   } finally {
     testing.value = false;
   }
 }
 
 async function doSync(direction: 'merge' | 'push' | 'pull') {
+  // 门槛：未配置不得同步（按钮同时禁用，双保险）
+  if (!configured.value) return;
   // push/pull 是整体覆盖的破坏性操作，必须先确认
   if (direction === 'push') {
     const ok = await ctx.confirm({
@@ -166,212 +232,224 @@ async function doSync(direction: 'merge' | 'push' | 'pull') {
   try {
     if (!(await save(true))) return;
     const report = await api.syncNow(direction);
-    statusOk.value = true;
-    status.value = `✓ ${report.message}`;
+    setStatus(`✓ ${report.message}`, true);
     await ctx.refresh();
   } catch (e) {
-    statusOk.value = false;
-    status.value = `✗ ${e}`;
+    setStatus(`✗ ${e}`, false);
   } finally {
     syncing.value = false;
   }
 }
 
-const httpWarn = () => /^http:\/\//i.test(url.value.trim());
+// 「去填写」：把焦点带到当前 provider 的必填输入框（地址 / Token）
+const urlEl = ref<HTMLInputElement | null>(null);
+const tokenEl = ref<HTMLInputElement | null>(null);
+function goFill() {
+  (provider.value === 'gist' ? tokenEl : urlEl).value?.focus();
+}
 
-const providerName = computed(() => (provider.value === 'gist' ? 'GitHub Gist' : 'WebDAV'));
-const providerOn = computed(() =>
-  provider.value === 'gist' ? gistEnabled.value : davEnabled.value,
-);
+const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 </script>
 
 <template>
   <div class="sync">
     <header class="sync-head">
       <h2 class="sync-title">云同步</h2>
-      <span class="on-badge" :class="{ on: providerOn }">
+      <span class="on-badge" :class="{ on: state === 'on', ready: state === 'ready' }">
         <span class="on-dot" />
-        {{ providerOn ? '已启用' : '未启用' }}
+        {{ stateLabel }}
       </span>
       <span class="grow" />
     </header>
 
     <div class="sync-body">
-      <!-- 状态总览卡 -->
-      <div class="overview card">
-        <div class="ov-icon">
-          <Cloud :size="21" :stroke-width="1.8" />
-        </div>
-        <div class="ov-info">
-          <div class="ov-title">{{ providerName }}</div>
-          <div class="ov-desc muted">条目级合并：同条目保留较新版本，删除跨设备传播</div>
-        </div>
-        <div class="ov-actions">
-          <button class="ob" :disabled="syncing" title="双向合并" @click="doSync('merge')">
-            <RefreshCw :size="14" :class="{ spin: syncing }" /> 立即同步
-          </button>
-          <button class="ob" :disabled="syncing" title="本机覆盖云端" @click="doSync('push')">
-            <UploadCloud :size="14" /> 仅上传
-          </button>
-          <button class="ob" :disabled="syncing" title="云端覆盖本机" @click="doSync('pull')">
-            <DownloadCloud :size="14" /> 仅下载
-          </button>
-        </div>
-      </div>
+      <!-- v3：整页一张卡，左侧 3px 状态饰条 -->
+      <div class="onecard card">
+        <!-- 后端切换：单卡第一行——provider 决定下方状态/开关/表单 -->
+        <Segmented
+          :model-value="provider"
+          :options="providerOptions"
+          @update:model-value="switchProvider"
+        />
 
-      <!-- 后端切换 -->
-      <Segmented :model-value="provider" :options="providerOptions" @update:model-value="switchProvider" />
+        <!-- 状态区：icon + provider + 徽章 + 描述 + 上次同步/条目统计 + 同步按钮 -->
+        <div class="overview">
+          <div class="ov-icon">
+            <Cloud :size="21" :stroke-width="1.8" />
+          </div>
+          <div class="ov-info">
+            <div class="ov-title-row">
+              <span class="ov-title">{{ providerName }}</span>
+              <span class="state-badge" :class="`st-${state}`">{{ stateLabel }}</span>
+            </div>
+            <div class="ov-desc muted">条目级合并：同条目保留较新版本，删除也会同步到其他设备</div>
+            <div class="ov-meta muted tnum">
+              <span>{{ lastSyncLabel }}</span>
+              <span class="meta-sep">·</span>
+              <span>{{ statsLabel }}</span>
+              <span class="meta-sep">·</span>
+              <span>图片仅存本机，不参与同步</span>
+            </div>
+          </div>
+          <div class="ov-actions">
+            <button class="ob" :disabled="syncing || !configured" title="双向合并" @click="doSync('merge')">
+              <RefreshCw :size="14" :class="{ spin: syncing }" /> 立即同步
+            </button>
+            <button class="ob" :disabled="syncing || !configured" title="本机覆盖云端" @click="doSync('push')">
+              <UploadCloud :size="14" /> 仅上传
+            </button>
+            <button class="ob" :disabled="syncing || !configured" title="云端覆盖本机" @click="doSync('pull')">
+              <DownloadCloud :size="14" /> 仅下载
+            </button>
+            <button v-if="!configured" class="ob go-fill" title="填好必填项后即可同步" @click="goFill">
+              去填写
+            </button>
+          </div>
+        </div>
 
-      <!-- 同步范围（与后端无关的公共选项） -->
-      <div class="form card">
-        <label class="row opt">
-          <span class="switch">
-            <input v-model="syncClipboard" type="checkbox" @change="markDirty" />
-            <span class="track"><span class="thumb" /></span>
-          </span>
-          <span>
-            云同步包含剪贴板历史
-            <small class="muted block-note">
-              默认关闭。剪贴板里常出现密码等敏感内容，开启后文本历史会随同步上传到你的网盘 / Gist
-            </small>
-            <small v-if="syncClipboard" class="muted block-note">
-              注意：多设备间此开关需保持一致，否则云端剪贴板内容会随各端设置互相覆盖
-            </small>
-          </span>
-        </label>
-        <p v-if="provider === 'webdav' && httpWarn()" class="muted hint warn-hint">
-          当前使用 http:// 连接，账号密码将以明文传输；如服务器支持，建议改用 https://
-        </p>
-      </div>
-
-      <!-- WebDAV 表单 -->
-      <div v-if="provider === 'webdav'" class="form card">
-        <p class="muted hint">
-          推荐坚果云：<span class="mono">https://dav.jianguoyun.com/dav/prompt-tool/</span>
-          （末级目录自动创建；密码使用应用密码）
-        </p>
-        <label class="field">
-          <span>服务器地址</span>
-          <input
-            v-model="url"
-            type="text"
-            placeholder="https://dav.jianguoyun.com/dav/prompt-tool/"
-            spellcheck="false"
-            @input="markDirty"
-          />
-        </label>
-        <div class="row-fields">
-          <label class="field grow">
-            <span>账号</span>
-            <input v-model="username" type="text" autocomplete="off" spellcheck="false" @input="markDirty" />
+        <!-- 开关区：启用 / 自动同步（跟随 provider）+ 同步范围 -->
+        <div class="opts">
+          <label class="row opt">
+            <span class="switch">
+              <input v-model="providerEnabled" type="checkbox" />
+              <span class="track"><span class="thumb" /></span>
+            </span>
+            <span>
+              启用 {{ providerName }} 同步
+              <small class="muted block-note">只影响自动同步，仍可手动同步</small>
+            </span>
           </label>
-          <label class="field grow">
-            <span>密码 / 应用密码</span>
+          <label class="row opt">
+            <span class="switch">
+              <input v-model="providerAutoSync" type="checkbox" />
+              <span class="track"><span class="thumb" /></span>
+            </span>
+            <span>
+              自动同步
+              <small class="muted block-note">启动时与内容变更后自动合并</small>
+            </span>
+          </label>
+          <label class="row opt">
+            <span class="switch">
+              <input v-model="syncClipboard" type="checkbox" @change="markDirty" />
+              <span class="track"><span class="thumb" /></span>
+            </span>
+            <span>
+              云同步包含剪贴板历史
+              <small class="muted block-note">敏感内容也会上云，多设备需保持一致</small>
+            </span>
+          </label>
+        </div>
+
+        <div class="hairline" />
+
+        <!-- 表单字段（跟随上方 provider 选择） -->
+        <!-- WebDAV 表单 -->
+        <div v-if="provider === 'webdav'" class="form">
+          <p class="muted hint">
+            推荐坚果云：<span class="mono">https://dav.jianguoyun.com/dav/prompt-tool/</span>
+            （末级目录自动创建；密码使用应用密码）
+          </p>
+          <label class="field">
+            <span>服务器地址</span>
+            <input
+              ref="urlEl"
+              v-model="url"
+              type="text"
+              placeholder="https://dav.jianguoyun.com/dav/prompt-tool/"
+              spellcheck="false"
+              @input="markDirty"
+            />
+          </label>
+          <div class="row-fields">
+            <label class="field grow">
+              <span>账号</span>
+              <input v-model="username" type="text" autocomplete="off" spellcheck="false" @input="markDirty" />
+            </label>
+            <label class="field grow">
+              <span>密码 / 应用密码</span>
+              <span class="pwd-box">
+                <input
+                  v-model="password"
+                  :type="showWebdavPwd ? 'text' : 'password'"
+                  autocomplete="new-password"
+                  @input="markDirty"
+                />
+                <button
+                  class="eye"
+                  type="button"
+                  :aria-label="showWebdavPwd ? '隐藏密码' : '显示密码'"
+                  @click="showWebdavPwd = !showWebdavPwd"
+                >
+                  <Eye v-if="showWebdavPwd" :size="14" />
+                  <EyeOff v-else :size="14" />
+                </button>
+              </span>
+            </label>
+          </div>
+          <p v-if="httpWarn()" class="muted hint warn-hint">
+            当前使用 http:// 连接，账号密码将以明文传输；如服务器支持，建议改用 https://
+          </p>
+        </div>
+
+        <!-- GitHub Gist 表单 -->
+        <div v-else class="form">
+          <p class="muted hint">
+            数据保存在你的 <b>secret Gist</b>（不公开、仅凭 Token 可访问、自带版本历史）。
+            Token 创建：GitHub → Settings → Developer settings →
+            <b>Personal access tokens (classic)</b> → 勾选 <span class="mono">gist</span> 权限。
+          </p>
+          <label class="field">
+            <span>GitHub Token</span>
             <span class="pwd-box">
               <input
-                v-model="password"
-                :type="showWebdavPwd ? 'text' : 'password'"
+                ref="tokenEl"
+                v-model="token"
+                :type="showToken ? 'text' : 'password'"
+                placeholder="ghp_… / github_pat_…"
                 autocomplete="new-password"
+                spellcheck="false"
                 @input="markDirty"
               />
               <button
                 class="eye"
                 type="button"
-                :aria-label="showWebdavPwd ? '隐藏密码' : '显示密码'"
-                @click="showWebdavPwd = !showWebdavPwd"
+                :aria-label="showToken ? '隐藏 Token' : '显示 Token'"
+                @click="showToken = !showToken"
               >
-                <Eye v-if="showWebdavPwd" :size="14" />
+                <Eye v-if="showToken" :size="14" />
                 <EyeOff v-else :size="14" />
               </button>
             </span>
           </label>
-        </div>
-        <label class="row opt">
-          <span class="switch">
-            <input v-model="davEnabled" type="checkbox" @change="markDirty" />
-            <span class="track"><span class="thumb" /></span>
-          </span>
-          <span>启用 WebDAV 同步</span>
-        </label>
-        <label class="row opt">
-          <span class="switch">
-            <input v-model="davAutoSync" type="checkbox" @change="markDirty" />
-            <span class="track"><span class="thumb" /></span>
-          </span>
-          <span>自动同步（启动时与内容变更后自动合并）</span>
-        </label>
-      </div>
-
-      <!-- GitHub Gist 表单 -->
-      <div v-else class="form card">
-        <p class="muted hint">
-          数据保存在你的 <b>secret Gist</b>（不公开、仅凭 Token 可访问、自带版本历史）。
-          Token 创建：GitHub → Settings → Developer settings →
-          <b>Personal access tokens (classic)</b> → 勾选 <span class="mono">gist</span> 权限。
-        </p>
-        <label class="field">
-          <span>GitHub Token</span>
-          <span class="pwd-box">
+          <label class="field">
+            <span>Gist ID（留空则首次同步时自动创建）</span>
             <input
-              v-model="token"
-              :type="showToken ? 'text' : 'password'"
-              placeholder="ghp_… / github_pat_…"
-              autocomplete="new-password"
+              v-model="gistId"
+              type="text"
+              placeholder="自动创建后回填显示"
               spellcheck="false"
-              @input="markDirty"
+              @input="onGistIdInput"
             />
-            <button
-              class="eye"
-              type="button"
-              :aria-label="showToken ? '隐藏 Token' : '显示 Token'"
-              @click="showToken = !showToken"
-            >
-              <Eye v-if="showToken" :size="14" />
-              <EyeOff v-else :size="14" />
-            </button>
-          </span>
-        </label>
-        <label class="field">
-          <span>Gist ID（留空则首次同步时自动创建）</span>
-          <input
-            v-model="gistId"
-            type="text"
-            placeholder="自动创建后回填显示"
-            spellcheck="false"
-            @input="onGistIdInput"
-          />
-        </label>
-        <label class="row opt">
-          <span class="switch">
-            <input v-model="gistEnabled" type="checkbox" @change="markDirty" />
-            <span class="track"><span class="thumb" /></span>
-          </span>
-          <span>启用 GitHub 同步</span>
-        </label>
-        <label class="row opt">
-          <span class="switch">
-            <input v-model="gistAutoSync" type="checkbox" @change="markDirty" />
-            <span class="track"><span class="thumb" /></span>
-          </span>
-          <span>自动同步（启动时与内容变更后自动合并）</span>
-        </label>
-      </div>
+          </label>
+        </div>
 
-      <!-- 操作行 -->
-      <div class="btns">
-        <AccentButton :disabled="testing || syncing" @click="save()">保存配置</AccentButton>
-        <button :disabled="testing" @click="test">{{ testing ? '测试中…' : '测试连接' }}</button>
-      </div>
+        <!-- 卡底操作行 -->
+        <div class="btns">
+          <button :disabled="testing" @click="test">{{ testing ? '测试中…' : '测试连接' }}</button>
+          <AccentButton :disabled="testing || syncing" @click="save()">保存配置</AccentButton>
+        </div>
 
-      <!-- 终端式状态条 -->
-      <div v-if="status" class="status tnum" :class="{ ok: statusOk, err: !statusOk }">
-        <span class="status-prompt mono">pm</span>
-        {{ status }}
-      </div>
+        <!-- 终端式状态条 -->
+        <div v-if="status" class="status tnum" :class="{ ok: statusOk, err: !statusOk }">
+          <span class="status-prompt mono">pm</span>
+          {{ status }}<template v-if="statusAt"> · {{ relTime(statusAt) }}</template>
+        </div>
 
-      <div class="note faint">
-        「立即同步 / 仅上传 / 仅下载」会先自动保存当前表单配置。
-        凭据仅保存在本机的系统凭据管理器（Windows 凭据管理器），不会随数据上传。
+        <div class="note faint">
+          「立即同步 / 仅上传 / 仅下载」会先自动保存当前表单配置。
+          凭据仅保存在本机的系统凭据管理器（Windows 凭据管理器），不会随数据上传。
+        </div>
       </div>
     </div>
   </div>
@@ -420,6 +498,16 @@ const providerOn = computed(() =>
   background: var(--faint);
 }
 
+.on-badge.ready {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: transparent;
+}
+
+.on-badge.ready .on-dot {
+  background: var(--warn);
+}
+
 .on-badge.on {
   color: var(--ok);
   background: var(--ok-soft);
@@ -445,11 +533,22 @@ const providerOn = computed(() =>
   margin: 0 auto;
 }
 
-/* 滚动容器内的块级子元素不参与高度收缩：否则内容溢出时各卡先被 flex
-   压扁（概览卡 overflow:hidden 最小高度为 0，压得最狠）而非出现滚动条 */
+/* 滚动容器内的块级子元素不参与高度收缩：否则内容溢出时卡片先被 flex
+   压扁（最小高度为 0）而非出现滚动条 */
 .sync-body > * {
   flex: none;
 }
+
+/* ---------- 单卡（v3）：左侧 3px 状态饰条 ---------- */
+
+.onecard {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+}
+
+/* 状态区 */
 
 .overview {
   display: flex;
@@ -457,19 +556,6 @@ const providerOn = computed(() =>
   flex-wrap: wrap;
   gap: 14px;
   row-gap: 10px;
-  padding: 16px 18px;
-  position: relative;
-  overflow: hidden;
-}
-
-.overview::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--brand-btn);
 }
 
 .ov-icon {
@@ -489,9 +575,35 @@ const providerOn = computed(() =>
   min-width: 220px;
 }
 
+.ov-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .ov-title {
   font-weight: 650;
   font-size: var(--fs-lg);
+}
+
+.state-badge {
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  color: var(--faint);
+  background: var(--panel-2);
+}
+
+.state-badge.st-ready {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.state-badge.st-on {
+  color: var(--ok);
+  background: var(--ok-soft);
 }
 
 .ov-desc {
@@ -499,18 +611,35 @@ const providerOn = computed(() =>
   margin-top: 3px;
 }
 
+.ov-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+.meta-sep {
+  color: var(--faint);
+}
+
 .ov-actions {
   display: flex;
   gap: 7px;
-  flex: none;
-  /* 收窄被换行到第二行时靠右对齐 */
-  margin-left: auto;
+  flex: 1 1 100%;
+  /* 独占一行：空间再窄也保持在状态信息下方，不与之争宽 */
 }
 
 .ob {
   font-size: 12px;
   padding: 7px 13px;
   gap: 6px;
+}
+
+.go-fill {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: var(--warn-soft);
 }
 
 .spin {
@@ -523,11 +652,31 @@ const providerOn = computed(() =>
   }
 }
 
+/* 后端切换：卡首紧凑胶囊（不随 flex 列拉伸成通栏灰带） */
+.onecard > .seg {
+  align-self: flex-start;
+}
+
+/* 开关区 */
+
+.opts {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hairline {
+  height: 1px;
+  background: var(--border);
+  flex: none;
+}
+
+/* 表单区 */
+
 .form {
   display: flex;
   flex-direction: column;
   gap: 13px;
-  padding: 16px 18px;
 }
 
 .hint {

@@ -7,7 +7,7 @@ import {
   Trash2,
   Pin,
   PinOff,
-  Save,
+  ClipboardPaste,
   Sparkles,
   Keyboard,
   Pencil,
@@ -15,11 +15,12 @@ import {
 } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import { managerKey } from '../lib/context';
-import { hasVars } from '../lib/vars';
-import { preview, matchText, highlightSegs } from '../lib/search';
+import { hasVars, extractVars, isAutoVar, applyVars, VAR_RE } from '../lib/vars';
+import { matchText, highlightSegs } from '../lib/search';
+import { previewSegments } from '../lib/preview';
 import { categoryColor } from '../lib/categoryColor';
 import { emptyPrompt } from '../types';
-import type { Prompt } from '../types';
+import type { Prompt, VarField } from '../types';
 import HotkeyInput from './HotkeyInput.vue';
 import EmptyState from './ui/EmptyState.vue';
 import CategoryBadge from './ui/CategoryBadge.vue';
@@ -29,6 +30,12 @@ import KeyCap from './ui/KeyCap.vue';
 const ctx = inject(managerKey)!;
 
 const varMark = '{{变量}}';
+/** 自动保存防抖：停止输入 900ms 后静默落盘 */
+const AUTO_SAVE_DELAY = 900;
+/** 「✓ 已自动保存」提示停留时长 */
+const SAVED_TIP_MS = 2400;
+/** 复制按钮「已复制 ✓」回弹时长 */
+const COPY_TIP_MS = 1200;
 
 const selectedCategory = ref('');
 const query = ref('');
@@ -47,6 +54,22 @@ function setRenameInput(el: unknown) {
   renameInput.value = (el as HTMLInputElement | null) ?? null;
 }
 const searchInput = ref<HTMLInputElement | null>(null);
+
+/** 自动保存状态机：idle 无指示 / dirty ● 未保存 / saved ✓ 已自动保存 */
+const saveState = ref<'idle' | 'dirty' | 'saved'>('idle');
+/** 变量卡当前值（不属提示词正文，不参与 dirty/自动保存） */
+const varValues = ref<Record<string, string>>({});
+/** 填写变量并粘贴进行中（防重复点击） */
+const pasteBusy = ref(false);
+/** 复制按钮「已复制 ✓」短暂态 */
+const copied = ref(false);
+const contentEl = ref<HTMLTextAreaElement | null>(null);
+const mirrorEl = ref<HTMLElement | null>(null);
+
+let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
+let savedTipTimer: ReturnType<typeof setTimeout> | undefined;
+let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+let varLoadSeq = 0;
 
 const allPrompts = computed(() => ctx.data.value?.prompts ?? []);
 const categories = computed(() => ctx.data.value?.categories ?? []);
@@ -79,24 +102,47 @@ const catCounts = computed(() => {
 
 const draftColor = computed(() => categoryColor(draft.value?.category ?? ''));
 
+/** 手动变量数（排除 {{clipboard}} 等自动变量，与 QuickPanel/VarDialog 口径一致） */
+function manualVarCount(content: string): number {
+  return extractVars(content).filter((v) => !isAutoVar(v.name)).length;
+}
+
+/** 当前草稿的手动变量卡（含 hint，供 placeholder；{{clipboard}} 自动变量不进卡） */
+const draftVars = computed<VarField[]>(() =>
+  draft.value ? extractVars(draft.value.content).filter((v) => !isAutoVar(v.name)) : [],
+);
+
+/** 变量名转 {{名}} 记号文本（模板里不能直接写字面量闭合花括号） */
+function varChip(name: string) {
+  return '{{' + name + '}}';
+}
+
 async function openPrompt(p: Prompt) {
+  await flushAutoSave();
   if (!(await confirmDiscard())) return;
   selectedId.value = p.id;
   loadDraft(p);
+  void loadVarValues();
 }
 
 function loadDraft(p: Prompt) {
   draft.value = JSON.parse(JSON.stringify(p));
   snapshot.value = JSON.stringify(draft.value);
   dirty.value = false;
+  saveState.value = 'idle';
+  clearTimeout(savedTipTimer);
 }
 
 async function newPrompt() {
+  await flushAutoSave();
   if (!(await confirmDiscard())) return;
   selectedId.value = '';
   draft.value = emptyPrompt(selectedCategory.value);
   snapshot.value = '';
   dirty.value = false;
+  saveState.value = 'idle';
+  varValues.value = {};
+  clearTimeout(savedTipTimer);
 }
 
 async function confirmDiscard(): Promise<boolean> {
@@ -112,30 +158,109 @@ async function confirmDiscard(): Promise<boolean> {
 function markDirty() {
   if (!draft.value) return;
   dirty.value = JSON.stringify(draft.value) !== snapshot.value;
+  if (dirty.value) {
+    saveState.value = 'dirty';
+    scheduleAutoSave();
+  }
+}
+
+/**
+ * 保存核心：手动路径（toast + 重载草稿）与自动路径（静默，防光标跳动）共用。
+ * 静默路径不 toast、不重载草稿：只把后端回写的 id/审计字段原位同步进草稿并
+ * 更新快照；保存期间若又有输入，dirty 会被重新算回 true 等下一轮自动保存
+ */
+async function saveCore(opts: { silent?: boolean } = {}): Promise<boolean> {
+  if (!draft.value) return false;
+  if (!draft.value.title.trim()) {
+    if (!opts.silent) ctx.toast('请填写标题', 'err');
+    return false;
+  }
+  // 本次落盘的状态基线（深拷贝）：静默路径用它和后端回写字段合成新快照
+  const saving = JSON.parse(JSON.stringify(draft.value)) as Prompt;
+  try {
+    await api.savePrompt({ ...draft.value });
+    await ctx.refresh();
+  } catch (e) {
+    ctx.toast(String(e), 'err');
+    return false;
+  }
+  if (opts.silent) {
+    const saved = selectedId.value
+      ? allPrompts.value.find((p) => p.id === selectedId.value)
+      : [...allPrompts.value].sort((a, b) => b.createdAt - a.createdAt)[0];
+    if (saved) {
+      if (!selectedId.value) {
+        // 新建提示词首次自动保存：后端已建档，把 id 写回草稿，下一轮改为更新
+        selectedId.value = saved.id;
+        saving.id = saved.id;
+        draft.value.id = saved.id;
+      }
+      saving.updatedAt = saved.updatedAt;
+      saving.useCount = saved.useCount;
+      saving.lastUsedAt = saved.lastUsedAt;
+      draft.value.updatedAt = saved.updatedAt;
+      draft.value.useCount = saved.useCount;
+      draft.value.lastUsedAt = saved.lastUsedAt;
+    }
+    snapshot.value = JSON.stringify(saving);
+    dirty.value = JSON.stringify(draft.value) !== snapshot.value;
+    return true;
+  }
+  ctx.toast('已保存');
+  if (selectedId.value) {
+    loadDraft(allPrompts.value.find((p) => p.id === selectedId.value) ?? draft.value);
+  } else {
+    const newest = [...allPrompts.value].sort((a, b) => b.createdAt - a.createdAt)[0];
+    if (newest) {
+      selectedId.value = newest.id;
+      loadDraft(newest);
+    }
+  }
+  return true;
 }
 
 async function save() {
-  if (!draft.value) return;
-  if (!draft.value.title.trim()) {
-    ctx.toast('请填写标题', 'err');
-    return;
+  // 手动保存立即落盘，挂起的自动保存不再需要
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = undefined;
+  if (await saveCore()) {
+    saveState.value = 'idle';
+    clearTimeout(savedTipTimer);
   }
-  try {
-    await api.savePrompt({ ...draft.value });
-    ctx.toast('已保存');
-    await ctx.refresh();
-    if (selectedId.value) {
-      loadDraft(allPrompts.value.find((p) => p.id === selectedId.value) ?? draft.value);
-    } else {
-      const newest = [...allPrompts.value].sort((a, b) => b.createdAt - a.createdAt)[0];
-      if (newest) {
-        selectedId.value = newest.id;
-        loadDraft(newest);
-      }
-    }
-  } catch (e) {
-    ctx.toast(String(e), 'err');
+}
+
+// ---------- 自动保存（防抖静默落盘） ----------
+
+function scheduleAutoSave() {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = undefined;
+    void autoSave();
+  }, AUTO_SAVE_DELAY);
+}
+
+async function autoSave() {
+  if (!draft.value || !dirty.value) return;
+  const ok = await saveCore({ silent: true });
+  if (!draft.value) return; // 保存期间草稿被关闭/删除
+  if (ok && !dirty.value) {
+    saveState.value = 'saved';
+    clearTimeout(savedTipTimer);
+    savedTipTimer = setTimeout(() => {
+      if (saveState.value === 'saved') saveState.value = 'idle';
+    }, SAVED_TIP_MS);
+  } else {
+    // 失败（或保存期间又有输入）：保持「● 未保存」
+    saveState.value = 'dirty';
   }
+}
+
+/** 立即触发挂起的自动保存：切换提示词/新建前调用，能存则存，避免误弹「放弃修改」 */
+async function flushAutoSave() {
+  if (!autoSaveTimer) return;
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = undefined;
+  await autoSave();
 }
 
 async function remove() {
@@ -186,15 +311,126 @@ function onTagInput(e: Event) {
   markDirty();
 }
 
+/** 复制正文原文（{{变量}} 占位符不替换），按钮短暂显示「已复制 ✓」 */
 async function copyContent() {
   if (!draft.value?.content) return;
   try {
     await api.copyText(draft.value.content);
-    ctx.toast('已复制内容');
+    copied.value = true;
+    clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => (copied.value = false), COPY_TIP_MS);
+    ctx.toast('已复制，含 {{变量}} 占位符原文');
   } catch (e) {
     ctx.toast(String(e), 'err');
   }
 }
+
+// ---------- 变量卡：记忆预填 + 填写并粘贴 ----------
+
+/** 打开提示词时重置变量卡并按变量记忆预填（openPrompt 显式调用）。
+ *  保存后的草稿重载/自动建档不经过这里，已输入的变量值不会被清掉 */
+async function loadVarValues() {
+  const id = draft.value?.id ?? '';
+  const seq = ++varLoadSeq;
+  const values: Record<string, string> = {};
+  for (const f of draftVars.value) values[f.name] = '';
+  if (id) {
+    try {
+      const mem = await api.getVarMemory(id);
+      if (seq !== varLoadSeq || draft.value?.id !== id) return; // 已切到别的提示词
+      for (const f of draftVars.value) if (mem[f.name]) values[f.name] = mem[f.name];
+    } catch {
+      /* 记忆读取失败不影响使用 */
+    }
+  }
+  if (seq !== varLoadSeq) return;
+  varValues.value = values;
+}
+
+/** {{clipboard}} 自动变量：粘贴前用当前剪贴板文本填充
+ *  （QuickPanel doPaste 同款语义；读取失败 ≠ 剪贴板为空，文案须区分） */
+function clipboardVarRe(): RegExp {
+  return /\{\{\s*clipboard(?:\s*\|[^{}]*)?\s*\}\}/gi;
+}
+
+async function fillClipboardVar(text: string): Promise<string> {
+  if (!clipboardVarRe().test(text)) return text;
+  let clip: string | null;
+  try {
+    clip = await api.getClipboardText();
+  } catch (e) {
+    ctx.toast(`读取剪贴板失败（${e}），{{clipboard}} 已留空`, 'err');
+    return text.replace(clipboardVarRe(), '');
+  }
+  if (!clip) ctx.toast('剪贴板为空，{{clipboard}} 已留空', 'err');
+  return text.replace(clipboardVarRe(), clip ?? '');
+}
+
+/** 主操作：变量卡当前值替换占位符 → {{clipboard}} 自动填充 → 粘贴到原活动窗口 */
+async function fillAndPaste() {
+  if (!draft.value?.content || pasteBusy.value) return;
+  pasteBusy.value = true;
+  try {
+    const fields = draftVars.value;
+    let text = applyVars(draft.value.content, varValues.value);
+    text = await fillClipboardVar(text);
+    const promptId = draft.value.id || undefined;
+    await api.invokePaste(text, promptId);
+    // 变量值记忆与 VarDialog 同口径回存（失败不阻断粘贴，仅留日志）
+    if (promptId && fields.length) {
+      const mem: Record<string, string> = {};
+      for (const f of fields) mem[f.name] = varValues.value[f.name] ?? '';
+      api.saveVarMemory(promptId, mem).catch((e) => {
+        console.error('[prompt-tool] 变量记忆保存失败:', e);
+      });
+    }
+    const filled = fields.filter((f) => varValues.value[f.name]).length;
+    ctx.toast(fields.length ? `已填写 ${filled}/${fields.length} 个变量并粘贴` : '已粘贴');
+  } catch (e) {
+    ctx.toast(String(e), 'err');
+  } finally {
+    pasteBusy.value = false;
+  }
+}
+
+// ---------- 镜像高亮编辑器 ----------
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** 镜像层高亮 HTML：先整体 HTML 转义，再把 {{…}}（VAR_RE 全片段）包上
+ *  琥珀记号 span。span 只变色不加盒模型，保证与 textarea 逐字符对齐 */
+function hlHTML(text: string): string {
+  let out = '';
+  let last = 0;
+  VAR_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = VAR_RE.exec(text)) !== null) {
+    out += escHtml(text.slice(last, m.index));
+    out += `<span class="var-mark">${escHtml(m[0])}</span>`;
+    last = m.index + m[0].length;
+  }
+  out += escHtml(text.slice(last));
+  return out;
+}
+
+/** 末尾补一个换行：pre 的收尾空行与 textarea 滚动高度保持一致 */
+const mirrorHtml = computed(() => hlHTML(draft.value?.content ?? '') + '\n');
+
+/** textarea → 镜像层滚动同步（镜像层自身不可滚动、不接收指针） */
+function syncMirrorScroll() {
+  const ta = contentEl.value;
+  const mir = mirrorEl.value;
+  if (!ta || !mir) return;
+  mir.scrollTop = ta.scrollTop;
+  mir.scrollLeft = ta.scrollLeft;
+}
+
+watch(
+  () => draft.value?.content,
+  () => nextTick(syncMirrorScroll),
+);
 
 // ---------- 分类管理 ----------
 
@@ -287,17 +523,22 @@ onBeforeUnmount(() => {
   ctx.setLeaveGuard(null);
   document.removeEventListener('keydown', onKeydown);
   window.removeEventListener('pm-focus-search', focusSearch);
+  clearTimeout(autoSaveTimer);
+  clearTimeout(savedTipTimer);
+  clearTimeout(copiedTimer);
 });
 
 function focusSearch() {
   searchInput.value?.focus();
 }
 
-// 列表变化时保持选中项的草稿同步（例如云同步覆盖）
+// 列表变化时保持选中项的草稿同步（例如云同步覆盖）。
+// 列表项与快照一致（多为刚保存后的数据回写）时不再重载草稿，
+// 避免替换草稿对象造成输入光标/变量卡状态无谓抖动
 watch(allPrompts, () => {
   if (selectedId.value && !dirty.value) {
     const p = allPrompts.value.find((x) => x.id === selectedId.value);
-    if (p) loadDraft(p);
+    if (p && JSON.stringify(p) !== snapshot.value) loadDraft(p);
   }
 });
 
@@ -389,14 +630,21 @@ function fmtTime(ts: number) {
                 <b v-if="seg.hit" class="hl">{{ seg.t }}</b>
                 <template v-else>{{ seg.t }}</template>
               </template>
-            </div>
-            <div class="pitem-row">
-              <CategoryBadge v-if="p.category" :name="p.category" mode="dot" />
-              <KeyCap v-if="p.hotkey" :combo="p.hotkey" />
               <span class="grow" />
-              <span v-if="p.useCount" class="use-n tnum">{{ p.useCount }} 次</span>
+              <CategoryBadge v-if="p.category" :name="p.category" mode="badge" />
             </div>
-            <div class="pitem-preview">{{ preview(p.content, 64) }}</div>
+            <!-- meta 行：无快捷键/次数/变量时整行不渲染，行高更紧凑 -->
+            <div v-if="p.hotkey || p.useCount || manualVarCount(p.content)" class="pitem-row">
+              <KeyCap v-if="p.hotkey" :combo="p.hotkey" />
+              <span v-if="p.useCount" class="use-n tnum">{{ p.useCount }} 次</span>
+              <span v-if="manualVarCount(p.content)" class="var-n tnum">{{ manualVarCount(p.content) }} 个变量</span>
+            </div>
+            <div class="pitem-preview">
+              <template v-for="(seg, si) in previewSegments(p.content, 44)" :key="si">
+                <span v-if="seg.chip" class="var-mark">{{ seg.t }}</span>
+                <template v-else>{{ seg.t }}</template>
+              </template>
+            </div>
           </div>
           <EmptyState v-if="!shown.length" :icon="Sparkles" title="暂无提示词">
             点右上角「新建」添加第一条
@@ -433,13 +681,38 @@ function fmtTime(ts: number) {
                 <span>内容</span>
                 <span class="faint tnum">{{ draft.content.length }} 字符</span>
               </div>
-              <textarea
-                v-model="draft.content"
-                class="d-content"
-                spellcheck="false"
-                placeholder="支持 {{变量|说明}} 占位符；{{clipboard}} 自动填入剪贴板内容"
-                @input="markDirty"
-              />
+              <!-- 镜像高亮编辑器：pre 与 textarea 同度量，{{…}} 琥珀高亮在镜像层 -->
+              <div class="ed-wrap">
+                <pre ref="mirrorEl" class="ed-mirror" aria-hidden="true" v-html="mirrorHtml" />
+                <textarea
+                  ref="contentEl"
+                  v-model="draft.content"
+                  class="ed-input d-content"
+                  spellcheck="false"
+                  placeholder="支持 {{变量|说明}} 占位符；{{clipboard}} 自动填入剪贴板内容"
+                  @input="markDirty"
+                  @scroll="syncMirrorScroll"
+                />
+              </div>
+            </div>
+
+            <!-- 变量卡：真输入框，按变量记忆预填，值只用于粘贴不进正文 -->
+            <div v-if="draftVars.length" class="d-card d-card-vars">
+              <div class="d-card-head">
+                <span>变量</span>
+                <span class="faint tnum">{{ draftVars.length }} 个</span>
+              </div>
+              <div class="var-fields">
+                <label v-for="f in draftVars" :key="f.name" class="var-field">
+                  <span class="var-mark mono var-name">{{ varChip(f.name) }}</span>
+                  <input
+                    v-model="varValues[f.name]"
+                    class="d-input"
+                    :placeholder="f.hint || `填入 ${f.name}`"
+                    spellcheck="false"
+                  />
+                </label>
+              </div>
             </div>
 
             <div class="d-grid2">
@@ -480,14 +753,28 @@ function fmtTime(ts: number) {
           </div>
 
           <div class="d-foot">
-            <span v-if="dirty" class="dirty-tag">未保存</span>
-            <span class="grow" />
-            <button class="ghost-btn" @click="copyContent"><Copy :size="14" /> 复制</button>
             <button class="ghost-btn danger" :disabled="!draft.id" @click="remove">
               <Trash2 :size="14" /> 删除
             </button>
-            <AccentButton class="save-btn" @click="save">
-              <Save :size="14" style="margin-right: 6px" />保存 <kbd>Ctrl S</kbd>
+            <span class="grow" />
+            <span
+              v-if="saveState !== 'idle'"
+              class="data-save"
+              :class="saveState"
+              aria-live="polite"
+            >
+              {{ saveState === 'dirty' ? '● 未保存' : '✓ 已自动保存' }}
+            </span>
+            <!-- 次级 strong（面板底+描边+粗体）：主操作让位给「复制」的实心墨块 -->
+            <button
+              class="strong-btn fill-paste-btn"
+              :disabled="pasteBusy || !draft.content"
+              @click="fillAndPaste"
+            >
+              <ClipboardPaste :size="14" />填写变量并粘贴
+            </button>
+            <AccentButton class="copy-btn" @click="copyContent">
+              <Copy :size="14" />{{ copied ? '已复制 ✓' : '复制' }}
             </AccentButton>
           </div>
         </template>
@@ -711,6 +998,11 @@ function fmtTime(ts: number) {
   white-space: nowrap;
 }
 
+/* 徽章是 flex 项，禁收缩避免长标题把徽章压扁 */
+.pitem-title .badge {
+  flex: none;
+}
+
 .pin {
   color: var(--warn);
   flex: none;
@@ -733,6 +1025,17 @@ function fmtTime(ts: number) {
   color: var(--faint);
 }
 
+/* 「N 个变量」计数 chip：琥珀记号色（--var），与预览 var-mark 同族 */
+.var-n {
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--var);
+  background: color-mix(in srgb, var(--var) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--var) 26%, transparent);
+  padding: 0 6px;
+  border-radius: 999px;
+}
+
 .pitem-preview {
   color: var(--faint);
   font-size: 11.5px;
@@ -740,6 +1043,20 @@ function fmtTime(ts: number) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* {{变量}} chip：琥珀记号色（--var），与 QuickPanel .var-chip 同族 */
+.var-mark {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0 5px;
+  margin: 0 1px;
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--var) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--var) 28%, transparent);
+  color: var(--var);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 /* 详情 */
@@ -865,14 +1182,100 @@ function fmtTime(ts: number) {
   min-height: 220px;
 }
 
-.d-content {
+/* 镜像高亮编辑器：镜像 pre 与输入 textarea 同字体/行高/padding/换行逐字符对齐 */
+.ed-wrap {
+  position: relative;
   flex: 1;
   min-height: 150px;
+}
+
+.ed-mirror,
+.ed-input {
+  margin: 0;
+  width: 100%;
+  height: 100%;
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.65;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
   white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.ed-mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
   background: var(--bg-soft);
+  color: var(--text-2);
+  user-select: none;
+}
+
+.ed-input {
+  position: relative;
+  display: block;
+  resize: none;
+  /* 文字交给镜像层显示，输入层只留光标与选区 */
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.ed-input:focus {
+  background: transparent;
+}
+
+.ed-input::selection {
+  background: color-mix(in srgb, var(--brand) 30%, transparent);
+}
+
+/* 镜像层的 {{…}} 记号：只变色不加盒模型，避免破坏与 textarea 的对齐
+   （v-html 内容不带 scoped 属性，须用 :deep 穿透） */
+.ed-mirror :deep(.var-mark) {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  border-radius: 0;
+  color: var(--var);
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* 变量卡：真输入框 */
+.d-card-vars {
+  flex: none;
+}
+
+.var-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px 14px;
+}
+
+.var-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.var-field .d-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.var-name {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .d-grid2 {
@@ -899,12 +1302,22 @@ function fmtTime(ts: number) {
   flex: none;
 }
 
-.dirty-tag {
+/* 自动保存指示：● 未保存 / ✓ 已自动保存 */
+.data-save {
   font-size: 11px;
-  color: var(--warn);
-  background: var(--warn-soft);
   padding: 3px 10px;
   border-radius: 999px;
+  white-space: nowrap;
+}
+
+.data-save.dirty {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.data-save.saved {
+  color: var(--ok);
+  background: var(--ok-soft);
 }
 
 .ghost-btn {
@@ -915,18 +1328,20 @@ function fmtTime(ts: number) {
   padding: 7px 14px;
 }
 
-.ghost-btn.danger:hover {
+/* 删除：红字描边恒定呈现（确认 + 撤销通知条行为不变） */
+.ghost-btn.danger {
   color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 32%, transparent);
 }
 
-.save-btn kbd {
-  margin-left: 7px;
-  /* 随主按钮反色自适应：亮=墨底白键帽，暗=骨白底炭键帽 */
-  background: color-mix(in srgb, var(--on-brand) 14%, transparent);
-  border-color: color-mix(in srgb, var(--on-brand) 28%, transparent);
-  box-shadow: none;
-  color: var(--on-brand);
-  font-size: 9.5px;
-  padding: 2px 5px;
+.ghost-btn.danger:hover {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* 填写变量并粘贴：次级 strong——面板底 + border-strong 描边 + 粗体（非实心墨块） */
+.strong-btn {
+  font-weight: 600;
+  border-color: var(--border-strong);
 }
 </style>

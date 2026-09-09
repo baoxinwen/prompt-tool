@@ -136,14 +136,14 @@ onMounted(() => {
           <span class="sec-ico"><Keyboard :size="14" /></span>
           <h3>快捷键</h3>
         </div>
-        <label class="opt col">
+        <label class="opt">
           <span>
             呼出快捷面板
             <small class="faint">在任何应用中按下即可呼出面板，Esc 或再按一次隐藏</small>
           </span>
           <HotkeyInput :model-value="hotkey" @update:model-value="onHotkeyChange" />
         </label>
-        <label class="opt col">
+        <label class="opt">
           <span>
             快速捕获
             <small class="faint">选中文本后按下，直接把选中内容保存为新提示词</small>
@@ -336,12 +336,6 @@ h3 {
   border-top: none;
 }
 
-.opt.col {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-}
-
 .opt span:first-child {
   display: flex;
   flex-direction: column;
@@ -401,11 +395,20 @@ h3 {
   background: linear-gradient(105deg, #161511 50%, #f8f7f4 50%);
 }
 
+/* 主题预览条：写死目标主题的强调色，不随页面主题变化（M8.4） */
 .th-bar {
   width: 55%;
   height: 8px;
   border-radius: 4px;
-  background: var(--brand-btn);
+  background: #8b877a;
+}
+
+.th-dark .th-bar {
+  background: #d8d3c4;
+}
+
+.th-light .th-bar {
+  background: #201e19;
 }
 
 .th-line {

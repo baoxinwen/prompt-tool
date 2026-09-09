@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref } from 'vue';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { FileText, ClipboardList, Cloud, HardDriveDownload, Settings, Zap, Minus, Square, X } from 'lucide-vue-next';
+import { FileText, ClipboardList, Cloud, Database, Settings, Zap, Minus, Square, X } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import { lastAutoUpdate } from '../lib/updateCache';
 import { managerKey } from '../lib/context';
@@ -216,7 +216,7 @@ const tabs = [
   { id: 'prompts', label: '提示词', icon: FileText },
   { id: 'clipboard', label: '剪贴板', icon: ClipboardList },
   { id: 'sync', label: '云同步', icon: Cloud },
-  { id: 'data', label: '数据', icon: HardDriveDownload },
+  { id: 'data', label: '数据', icon: Database },
   { id: 'settings', label: '设置', icon: Settings },
 ] as const;
 </script>

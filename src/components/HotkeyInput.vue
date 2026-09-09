@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { Eraser } from 'lucide-vue-next';
 import KeyCap from './ui/KeyCap.vue';
 import { hotkeyHint } from '../lib/platform';
 
@@ -75,15 +76,24 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCaptureKeydown, tr
       :class="{ capturing, empty: !modelValue }"
       role="button"
       tabindex="0"
-      aria-label="点击修改快捷键"
+      aria-label="点击录制快捷键"
       @click="capturing = true"
       @keydown.enter="capturing = true"
     >
       <KeyCap v-if="modelValue" :combo="modelValue" />
-      <span v-else class="key-empty">{{ capturing ? '按下新快捷键…' : '未设置' }}</span>
+      <span v-else class="key-empty">{{ capturing ? '按下新组合，Esc 取消' : '未设置 · 点击录制' }}</span>
     </span>
     <button class="sm" type="button" @click="capturing = true">修改</button>
-    <button v-if="modelValue" class="sm ghost" type="button" title="清除" @click="clear">×</button>
+    <button
+      v-if="modelValue"
+      class="sm ghost eraser"
+      type="button"
+      title="清除快捷键"
+      aria-label="清除快捷键"
+      @click="clear"
+    >
+      <Eraser :size="14" :stroke-width="1.8" />
+    </button>
   </span>
 
   <Teleport to="body">
@@ -110,7 +120,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCaptureKeydown, tr
   min-width: 150px;
   min-height: 34px;
   padding: 4px 12px;
-  border: 1px dashed var(--border-strong);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-sm);
   background: var(--input-bg);
   cursor: pointer;
@@ -122,7 +132,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCaptureKeydown, tr
 }
 
 .key-slot.capturing {
-  border-style: solid;
   border-color: var(--brand);
   box-shadow: 0 0 0 3px var(--brand-soft);
 }
@@ -140,6 +149,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCaptureKeydown, tr
 .sm {
   padding: 4px 10px;
   font-size: 12px;
+}
+
+/* 橡皮擦清除钮：26px 方形命中区（M8.1） */
+.eraser {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  padding: 0;
+  justify-content: center;
 }
 
 .cap-mask {

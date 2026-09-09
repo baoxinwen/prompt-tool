@@ -36,7 +36,7 @@ const baseSettings: Settings = {
   syncClipboard: false,
 };
 
-function makeCtx(settings: Settings) {
+function makeCtx(settings: Settings, extra: Partial<AppData> = {}) {
   const toasts: Array<{ msg: string; kind?: string }> = [];
   let refreshes = 0;
   let confirmResult = true;
@@ -44,7 +44,7 @@ function makeCtx(settings: Settings) {
   // 离开守卫（评审 I9）：记录注册/注销供断言
   let leaveGuard: (() => boolean) | null = null;
   const ctx = {
-    data: ref<AppData | null>({ settings } as unknown as AppData),
+    data: ref<AppData | null>({ settings, prompts: [], clipboard: [], ...extra } as unknown as AppData),
     refresh: async () => {
       refreshes++;
     },
@@ -131,7 +131,10 @@ describe('SyncPane：云同步设置', () => {
   it('保存配置：合并当前表单写入 settings（含 trim）并提示刷新', async () => {
     const { wrapper, ctx } = await mountPane();
     await inputByLabel(wrapper, '服务器地址').setValue('  https://trimmed.example.com/dav/  ');
-    await wrapper.find('.btns button').trigger('click');
+    await wrapper
+      .findAll('.btns button')
+      .find((b) => b.text().includes('保存配置'))!
+      .trigger('click');
     await flushPromises();
 
     const payload = mockedApi.saveSettings.mock.calls[0][0];
@@ -228,7 +231,10 @@ describe('SyncPane：云同步设置', () => {
       .find('input');
     await scope.setValue(true);
 
-    await wrapper.find('.btns button').trigger('click');
+    await wrapper
+      .findAll('.btns button')
+      .find((b) => b.text().includes('保存配置'))!
+      .trigger('click');
     await flushPromises();
     expect(mockedApi.saveSettings.mock.calls[0][0].syncClipboard).toBe(true);
   });
@@ -288,9 +294,137 @@ describe('SyncPane：云同步设置', () => {
 
     // gistId 输入框跟随后端回填
     expect((inputByLabel(wrapper, 'Gist ID').element as HTMLInputElement).value).toBe('gistNEW');
-    // 保存不再把后端的 gist_id 覆盖回空串
-    await wrapper.find('.btns button').trigger('click');
+    // 保存不再把后端的 gist_id 覆盖回空串（点 AccentButton 保存，不是第一个按钮「测试连接」）
+    await wrapper.find('.btns .ab').trigger('click');
     await flushPromises();
     expect(mockedApi.saveSettings.mock.calls[0][0].gist.gistId).toBe('gistNEW');
+  });
+});
+
+describe('SyncPane：单卡收敛（v3）', () => {
+  it('状态三态徽章：未配置 / 已配置未启用 st-ready / 已启用 st-on', async () => {
+    const unset = JSON.parse(JSON.stringify(baseSettings));
+    unset.webdav.url = '';
+    const { wrapper: wUnset } = await mountPane(unset);
+    expect(wUnset.find('.state-badge').text()).toContain('未配置');
+    expect(wUnset.find('.on-badge').text()).toContain('未配置');
+
+    const { wrapper: wReady } = await mountPane();
+    expect(wReady.find('.state-badge').classes()).toContain('st-ready');
+
+    const on = JSON.parse(JSON.stringify(baseSettings));
+    on.webdav.enabled = true;
+    const { wrapper: wOn } = await mountPane(on);
+    expect(wOn.find('.state-badge').classes()).toContain('st-on');
+
+    // configured 按 provider 取必填项：gist → token
+    const gistNoToken = JSON.parse(JSON.stringify(baseSettings));
+    gistNoToken.gist.token = '';
+    const { wrapper: wGist } = await mountPane(gistNoToken);
+    expect(wGist.find('.state-badge').classes()).toContain('st-ready');
+    await wGist.findAll('.seg-item').find((b) => b.text().includes('GitHub Gist'))!.trigger('click');
+    await flushPromises();
+    expect(wGist.find('.state-badge').text()).toContain('未配置');
+  });
+
+  it('同步门槛：未配置时三个同步按钮禁用、syncNow 不被调用、出现「去填写」', async () => {
+    const settings = JSON.parse(JSON.stringify(baseSettings));
+    settings.webdav.url = '';
+    const { wrapper } = await mountPane(settings);
+
+    const syncBtns = wrapper.findAll('button.ob').filter((b) => !b.text().includes('去填写'));
+    expect(syncBtns.length).toBe(3);
+    for (const b of syncBtns) expect(b.attributes('disabled')).toBeDefined();
+
+    await syncBtns.find((b) => b.text().includes('立即同步'))!.trigger('click');
+    await flushPromises();
+    expect(mockedApi.syncNow).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('去填写');
+  });
+
+  it('去填写：WebDAV 聚焦服务器地址输入框，Gist 聚焦 Token 输入框', async () => {
+    const settings = JSON.parse(JSON.stringify(baseSettings));
+    settings.webdav.url = '';
+    settings.gist.token = '';
+    // focus 断言要求组件真实挂到 document 上（VTU 默认挂到游离节点，activeElement 不变）
+    const ctx = makeCtx(settings);
+    const wrapper = mount(SyncPane, {
+      attachTo: document.body,
+      global: { provide: { [managerKey as symbol]: ctx } },
+    });
+    await flushPromises();
+    try {
+      await wrapper.findAll('button').find((b) => b.text().includes('去填写'))!.trigger('click');
+      expect(document.activeElement).toBe(inputByLabel(wrapper, '服务器地址').element);
+
+      await wrapper
+        .findAll('.seg-item')
+        .find((b) => b.text().includes('GitHub Gist'))!
+        .trigger('click');
+      await flushPromises();
+      await wrapper.findAll('button').find((b) => b.text().includes('去填写'))!.trigger('click');
+      expect(document.activeElement).toBe(inputByLabel(wrapper, 'GitHub Token').element);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it('上次同步：有值显示 relativeTime，无值显示「尚未同步」', async () => {
+    const withTs = JSON.parse(JSON.stringify(baseSettings));
+    withTs.lastSyncAt = Date.now() - 5 * 60_000;
+    const { wrapper } = await mountPane(withTs);
+    expect(wrapper.text()).toContain('上次同步 · 5 分钟前');
+
+    const { wrapper: wNone } = await mountPane();
+    expect(wNone.text()).toContain('尚未同步');
+    expect(wNone.text()).not.toContain('上次同步');
+  });
+
+  it('上次同步随 30s 定时刷新（刚刚 → 1 分钟前）', async () => {
+    vi.useFakeTimers();
+    try {
+      const t0 = Date.now();
+      const settings = JSON.parse(JSON.stringify(baseSettings));
+      settings.lastSyncAt = t0 - 30_000;
+      const ctx = makeCtx(settings);
+      const wrapper = mount(SyncPane, {
+        global: { provide: { [managerKey as symbol]: ctx } },
+      });
+      expect(wrapper.text()).toContain('上次同步 · 刚刚');
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(wrapper.text()).toContain('上次同步 · 1 分钟前');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('动作完成后状态回填相对时间：✓ … · 刚刚', async () => {
+    mockedApi.syncNow.mockResolvedValueOnce({ added: 0, updated: 0, removed: 0, message: '同步完成' });
+    const { wrapper } = await mountPane();
+    await wrapper.findAll('button.ob').find((b) => b.text().includes('立即同步'))!.trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.status').text()).toContain('✓ 同步完成 · 刚刚');
+  });
+
+  it('条目统计：显示提示词与剪贴板数量', async () => {
+    const settings = JSON.parse(JSON.stringify(baseSettings));
+    const ctx = makeCtx(settings, {
+      prompts: [{ id: 'p1' }, { id: 'p2' }],
+      clipboard: [{ id: 'c1' }],
+    } as Partial<AppData>);
+    const wrapper = mount(SyncPane, {
+      global: { provide: { [managerKey as symbol]: ctx } },
+    });
+    await flushPromises();
+    expect(wrapper.text()).toContain('2 条提示词');
+    expect(wrapper.text()).toContain('1 条剪贴板');
+  });
+
+  it('开关语义小字：启用「只影响自动同步」/ 自动同步 / 剪贴板上云提示', async () => {
+    const { wrapper } = await mountPane();
+    expect(wrapper.text()).toContain('只影响自动同步，仍可手动同步');
+    expect(wrapper.text()).toContain('启动时与内容变更后自动合并');
+    expect(wrapper.text()).toContain('敏感内容也会上云，多设备需保持一致');
+    expect(wrapper.text()).toContain('删除也会同步到其他设备');
   });
 });

@@ -30,7 +30,11 @@ defineProps<{ disabled?: boolean }>();
 }
 
 .ab:disabled {
-  opacity: 0.45;
+  opacity: 1;
+  background: var(--panel-2);
+  color: var(--muted);
+  border-color: var(--border);
+  cursor: default;
   pointer-events: none;
 }
 </style>

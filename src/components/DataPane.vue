@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { inject, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
-import { FileUp, FileDown, FileJson, FileType2 } from 'lucide-vue-next';
+import { FileUp, FileDown, FileJson, FileType2, FolderOpen } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import { managerKey } from '../lib/context';
 import AccentButton from './ui/AccentButton.vue';
@@ -11,6 +11,12 @@ const includeClipboard = ref(false);
 const exporting = ref(false);
 const importing = ref(false);
 const dragging = ref(false);
+
+/** 数据概览（M7.3）：提示词条数 + 剪贴板文本条数（图片条目不计） */
+const promptCount = computed(() => (ctx.data.value?.prompts ?? []).length);
+const clipTextCount = computed(
+  () => (ctx.data.value?.clipboard ?? []).filter((c) => c.kind !== 'image').length,
+);
 
 async function exportData(kind: 'json' | 'markdown') {
   exporting.value = true;
@@ -92,15 +98,17 @@ onBeforeUnmount(() => {
         @dragleave="dragging = false"
         @drop.prevent="dragging = false"
       >
-        <div class="dz-mark mono" aria-hidden="true">{{ '{' + '{ 拖进来 }' + '}' }}</div>
+        <div class="dz-mark mono" aria-hidden="true">« 拖入备份 »</div>
         <FileUp :size="26" :stroke-width="1.6" class="dz-ico" />
         <h3>把备份文件拖到这里</h3>
         <p class="muted desc">
           支持 JSON 备份、Markdown（# 分类 / ## 标题）、TXT（文件名作标题），可多选
         </p>
+        <span class="merge-line">与现有条目相同的自动跳过，不会覆盖或删除现有数据，其余全部新增</span>
         <AccentButton :disabled="importing" @click="importData">
           {{ importing ? '导入中…' : '或点击选择文件…' }}
         </AccentButton>
+        <span class="muted merge-note">相同的条目会自动跳过，放心导入</span>
       </div>
 
       <!-- 导出 -->
@@ -111,9 +119,9 @@ onBeforeUnmount(() => {
           <span class="muted ex-desc">将提示词导出为文件备份，或在其他工具中使用</span>
         </div>
         <div class="row wrap">
-          <AccentButton :disabled="exporting" @click="exportData('json')">
-            <FileJson :size="14" style="margin-right: 6px" />JSON 备份
-          </AccentButton>
+          <button :disabled="exporting" @click="exportData('json')">
+            <FileJson :size="14" /> JSON 备份
+          </button>
           <button :disabled="exporting" @click="exportData('markdown')">
             <FileType2 :size="14" /> Markdown
           </button>
@@ -122,6 +130,20 @@ onBeforeUnmount(() => {
           <input v-model="includeClipboard" type="checkbox" />
           <span class="muted">JSON 中包含剪贴板历史（不含图片）</span>
         </label>
+      </div>
+
+      <!-- 数据概览（M7.3）：条数 + 打开数据目录 -->
+      <div class="card ov-card">
+        <div class="ex-head">
+          <h3>数据概览</h3>
+          <span class="muted ex-desc">全部数据仅保存在本机</span>
+        </div>
+        <div class="ov-row">
+          <span>提示词 <b class="tnum">{{ promptCount }}</b></span>
+          <span>剪贴板文本 <b class="tnum">{{ clipTextCount }}</b></span>
+          <span class="grow" />
+          <button @click="api.openDataDir()"><FolderOpen :size="13" /> 打开数据目录</button>
+        </div>
       </div>
     </div>
 
@@ -221,6 +243,24 @@ onBeforeUnmount(() => {
   margin-top: 8px;
 }
 
+/* 合并语义（M7.1）：拖拽区语义行 + 按钮旁放心导入 */
+.merge-line {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid rgba(130, 169, 107, 0.4);
+  border-radius: 999px;
+  padding: 3px 14px;
+}
+
+.merge-note {
+  font-size: 11.5px;
+  margin-top: 2px;
+}
+
 /* 导出卡 */
 .export-card {
   padding: 16px 18px;
@@ -260,6 +300,28 @@ onBeforeUnmount(() => {
 
 .chk input {
   accent-color: var(--brand-btn);
+}
+
+/* 数据概览卡（M7.3） */
+.ov-card {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ov-row {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.ov-row .tnum {
+  color: var(--text);
+  font-weight: 600;
+  margin-left: 2px;
 }
 
 .note {

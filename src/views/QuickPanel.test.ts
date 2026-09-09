@@ -312,6 +312,63 @@ describe('QuickPanel：快捷面板', () => {
     wrapper.unmount();
   });
 
+  it('预览 chip 化：{{变量}} 渲染为 .var-chip（变量名为原子片段不截断）', async () => {
+    const wrapper = await mountPanel();
+    const rows = wrapper.findAll('.qp-list .item');
+    // p2 内容「本周完成：{{本周工作|工作内容}}」→ chip 只含变量名
+    const chips = rows[1].findAll('.item-preview .var-chip');
+    expect(chips.length).toBe(1);
+    expect(chips[0].text()).toBe('本周工作');
+    // chip 之外的纯文本照常渲染，不被吞掉
+    expect(rows[1].find('.item-preview').text()).toContain('本周完成：');
+    // 无变量的 p1 预览不产生 chip
+    expect(rows[0].findAll('.item-preview .var-chip').length).toBe(0);
+    wrapper.unmount();
+  });
+
+  it('页脚 Enter 提示动态化：手动变量数 > 0 → 「填写 N 个变量」，否则「粘贴」', async () => {
+    const data: AppData = {
+      ...fixture,
+      prompts: [
+        makePrompt({ id: 'pn1', title: '无变量', content: '请审查这段代码' }),
+        makePrompt({ id: 'pn2', title: '多变量', content: '{{a}} 和 {{b}}，重复的 {{a}} 不计' }),
+      ],
+    };
+    const wrapper = await mountPanel(data);
+    const footText = () => wrapper.find('.qp-foot').text();
+    // 无手动变量 → 粘贴
+    expect(footText()).toContain('粘贴');
+    // N = 去重后的手动变量数：{{a}}/{{b}} 计 2，重复的 {{a}} 不计
+    await wrapper.find('.qp').trigger('keydown', { key: 'ArrowDown' });
+    expect(footText()).toContain('填写 2 个变量');
+    wrapper.unmount();
+  });
+
+  it('自动变量 {{clipboard}} 不计入填写提示（Enter 直接粘贴不弹表单）', async () => {
+    const data: AppData = {
+      ...fixture,
+      prompts: [makePrompt({ id: 'pa', title: '自动变量', content: 'x{{clipboard}}' })],
+    };
+    const wrapper = await mountPanel(data);
+    const foot = wrapper.find('.qp-foot').text();
+    expect(foot).toContain('粘贴');
+    expect(foot).not.toContain('填写');
+    wrapper.unmount();
+  });
+
+  it('剪贴板 tab 分组延伸：时间分组头 + 类型图标，与主窗口同族', async () => {
+    const wrapper = await mountPanel();
+    await wrapper.find('.qp').trigger('keydown', { key: 'Tab' });
+    await flushPromises();
+    expect(wrapper.findAll('.qp-list .grp').length).toBeGreaterThan(0);
+    expect(wrapper.find('.qp-list .item .kind-ico').exists()).toBe(true);
+    // 分组后的行仍是 .item，Enter 粘贴行为不变
+    await wrapper.find('.qp').trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+    expect(mockedApi.invokePaste).toHaveBeenCalledWith('复制过的文本', undefined);
+    wrapper.unmount();
+  });
+
   it('pm-panel-shown 事件重置搜索会话', async () => {
     const wrapper = await mountPanel();
     await wrapper.find('input.qp-search').setValue('代码');
