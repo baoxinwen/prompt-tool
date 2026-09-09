@@ -1,6 +1,7 @@
 import type { VarField } from '../types';
 
-const VAR_RE = /\{\{\s*([^{}|]+?)\s*(?:\|([^{}]*))?\}\}/g;
+/** 变量占位符正则：{{名字}} 或 {{名字|提示}}（g 标志，exec 循环用后须重置 lastIndex） */
+export const VAR_RE = /\{\{\s*([^{}|]+?)\s*(?:\|([^{}]*))?\}\}/g;
 
 /** 提取提示词中的 {{变量}}，按出现顺序去重 */
 export function extractVars(content: string): VarField[] {
