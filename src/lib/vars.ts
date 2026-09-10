@@ -1,7 +1,9 @@
 import type { VarField } from '../types';
 
-/** 变量占位符正则：{{名字}} 或 {{名字|提示}}（g 标志，exec 循环用后须重置 lastIndex） */
-export const VAR_RE = /\{\{\s*([^{}|]+?)\s*(?:\|([^{}]*))?\}\}/g;
+/** 变量占位符正则：{{名字}} 或 {{名字|提示}}（g 标志，exec 循环用后须重置 lastIndex）。
+ *  名字首字符强制非空白：病态输入（`{{` 后跟数万连续空白且无闭合）下
+ *  惰性量词不再逐字符回退，匹配线性完成（评审 2026-09-10 lib#7） */
+export const VAR_RE = /\{\{\s*([^{}|\s][^{}|]*?)\s*(?:\|([^{}]*))?\}\}/g;
 
 /** 提取提示词中的 {{变量}}，按出现顺序去重 */
 export function extractVars(content: string): VarField[] {

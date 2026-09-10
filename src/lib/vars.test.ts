@@ -127,4 +127,27 @@ describe('applyClipboardVar：{{clipboard}} 填充（评审 C2）', () => {
   it('无占位符的文本原样返回', () => {
     expect(applyClipboardVar('普通文本', '剪贴内容')).toBe('普通文本');
   });
+
+  // 评审 2026-09-10 lib#7：名字首字符强制非空白后，语义必须与旧正则完全一致
+  it('语义回归：首尾空白/管道提示/嵌套管道/空占位与旧正则行为一致', () => {
+    expect(extractVars('{{ a }}').map((v) => v.name)).toEqual(['a']);
+    expect(extractVars('{{语言|要翻译的内容}}')[0]).toEqual({ name: '语言', hint: '要翻译的内容' });
+    expect(extractVars('{{ a | 提示 }}')[0].hint).toBe('提示');
+    expect(extractVars('{{ a|b|c }}')[0].hint).toBe('b|c');
+    expect(extractVars('{{|a}}')).toEqual([]);
+    expect(extractVars('{{  }}')).toEqual([]);
+    expect(applyVars('{{ a }}', { a: '值' })).toBe('值');
+    expect(extractVars('{{ a }} {{ b|c }}').map((v) => v.name)).toEqual(['a', 'b']);
+  });
+
+  // 评审 2026-09-10 lib#7：病态空白输入（`{{` 后跟 10 万连续空白且无闭合）
+  // 旧正则逐字符回退为 O(n²)（10 万条约需数十秒），新正则线性完成
+  it('病态空白输入线性完成，不触发二次回溯', () => {
+    const pathological = '{{' + ' '.repeat(100_000);
+    const t0 = performance.now();
+    expect(extractVars(pathological)).toEqual([]);
+    expect(hasVars(pathological)).toBe(false);
+    const elapsed = performance.now() - t0;
+    expect(elapsed).toBeLessThan(1000); // 新实现毫秒级，旧实现远超此限
+  });
 });
