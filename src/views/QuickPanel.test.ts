@@ -417,4 +417,32 @@ describe('QuickPanel：快捷面板', () => {
     expect(wrapper.findAll('.qp-list .qp-list-inner .item').length).toBe(3);
     wrapper.unmount();
   });
+
+  // 评审 2026-09-10 I1：浮层 .detail-body 特意设 user-select:text 支持选中，
+  // 无条件 preventDefault 会吞掉 Ctrl+C/Ctrl+A 的 keydown 默认行为，
+  // Chromium 中 copy 事件随之不派发——浮层内无法键盘复制
+  it('全文浮层放行 Ctrl/Meta 组合键：Ctrl+C 不被吞，其余按键仍拦截', async () => {
+    const wrapper = await mountPanel();
+    (wrapper.vm as unknown as { detailOpen: boolean }).detailOpen = true;
+
+    const ctrlC = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, cancelable: true });
+    wrapper.find('.qp').element.dispatchEvent(ctrlC);
+    expect(ctrlC.defaultPrevented).toBe(false);
+
+    const ctrlA = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, cancelable: true });
+    wrapper.find('.qp').element.dispatchEvent(ctrlA);
+    expect(ctrlA.defaultPrevented).toBe(false);
+
+    // 无修饰键仍拦截：防止浮层后的面板动作（Enter 粘贴等）误触发
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
+    wrapper.find('.qp').element.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(true);
+
+    // Esc/← 仍关闭浮层
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    wrapper.find('.qp').element.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(true);
+    expect((wrapper.vm as unknown as { detailOpen: boolean }).detailOpen).toBe(false);
+    wrapper.unmount();
+  });
 });

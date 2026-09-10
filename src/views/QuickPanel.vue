@@ -13,7 +13,7 @@ import {
 } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import { filterClipboard, filterPrompts, formatTime, highlightSegs } from '../lib/search';
-import { hasManualVars, extractVars, isAutoVar } from '../lib/vars';
+import { hasManualVars, extractVars, isAutoVar, applyClipboardVar, clipboardVarRe } from '../lib/vars';
 import { previewSegments } from '../lib/preview';
 import { TIME_GROUPS, timeGroup, groupTimeLabel, type TimeGroupName } from '../lib/timeGroup';
 import { computePanelHeight } from '../lib/panelHeight';
@@ -61,21 +61,23 @@ const busy = ref(false);
 const { thumbFor } = useImageThumbs();
 
 const MAX_RENDER = 100;
+// 过滤只算一遍：totals 与渲染列表共用同一份全量结果，避免每次过滤双算
+//（含全量排序，评审 2026-09-10 M-views#11）
+const allPrompts = computed(() =>
+  data.value ? filterPrompts(data.value.prompts, query.value, category.value) : [],
+);
+const allClips = computed(() =>
+  data.value ? filterClipboard(data.value.clipboard, query.value) : [],
+);
 const prompts = computed(() => {
-  const list = data.value ? filterPrompts(data.value.prompts, query.value, category.value) : [];
   // 无搜索词时截断渲染，避免大列表拖慢面板（输入即滤全量）
-  return query.value.trim() ? list : list.slice(0, MAX_RENDER);
+  return query.value.trim() ? allPrompts.value : allPrompts.value.slice(0, MAX_RENDER);
 });
 const clips = computed(() => {
-  const list = data.value ? filterClipboard(data.value.clipboard, query.value) : [];
-  return query.value.trim() ? list : list.slice(0, MAX_RENDER);
+  return query.value.trim() ? allClips.value : allClips.value.slice(0, MAX_RENDER);
 });
-const promptsTotal = computed(() =>
-  data.value ? filterPrompts(data.value.prompts, query.value, category.value).length : 0,
-);
-const clipsTotal = computed(() =>
-  data.value ? filterClipboard(data.value.clipboard, query.value).length : 0,
-);
+const promptsTotal = computed(() => allPrompts.value.length);
+const clipsTotal = computed(() => allClips.value.length);
 const hiddenCount = computed(
   () => (mode.value === 'prompts' ? promptsTotal.value : clipsTotal.value) - items.value,
 );
@@ -146,8 +148,12 @@ watch([query, mode, category], () => {
 
 // 后台剪贴板事件导致列表长度变化时：只收敛越界的选中项，
 // 不重置会话，否则用户正在阅读的全文浮层会被无关的复制动作关掉
+let suppressDetailClose = false;
 watch(items, () => {
   if (active.value >= items.value) {
+    // 收敛改值会触发 watch(active)，由旗标告知这次不是用户操作，
+    // 不关闭浮层（评审 2026-09-10 M-views#5）
+    suppressDetailClose = true;
     active.value = Math.max(0, items.value - 1);
   }
   // 内容增删（含首次加载）不改 scrollTop 就不会触发 scroll 事件，
@@ -156,7 +162,11 @@ watch(items, () => {
 });
 
 watch(active, () => {
-  detailOpen.value = false;
+  if (suppressDetailClose) {
+    suppressDetailClose = false;
+  } else {
+    detailOpen.value = false;
+  }
   nextTick(() => {
     listEl.value?.querySelector('.item.active')?.scrollIntoView({ block: 'nearest' });
   });
@@ -186,10 +196,8 @@ function syncHeight() {
 }
 
 /** {{clipboard}} 自动变量：粘贴/复制前用当前剪贴板文本填充。
- *  与 vars.ts 的 VAR_RE 语法对齐：允许带提示写法 {{clipboard|提示}} */
-function clipboardVarRe(): RegExp {
-  return /\{\{\s*clipboard(?:\s*\|[^{}]*)?\s*\}\}/gi;
-}
+ *  正则与替换统一用 vars.ts 导出实现（评审 2026-09-10 M2#9：
+ *  组件本地副本是 C1 类回归的土壤），此处只保留 UI 语义（toast 文案） */
 async function fillClipboardVar(text: string): Promise<string> {
   if (!clipboardVarRe().test(text)) return text;
   let clip: string | null;
@@ -198,11 +206,10 @@ async function fillClipboardVar(text: string): Promise<string> {
   } catch (e) {
     // 读取失败 ≠ 剪贴板为空：文案必须区分，否则用户会误以为剪贴板被清空
     showToast(`读取剪贴板失败（${e}），{{clipboard}} 已留空`, 'err');
-    return text.replace(clipboardVarRe(), () => '');
+    return applyClipboardVar(text, null);
   }
   if (!clip) showToast('剪贴板为空，{{clipboard}} 已留空', 'err');
-  // 函数替换：剪贴板含 $&/$$ 等替换序列时按字面填充，不被 String.replace 展开
-  return text.replace(clipboardVarRe(), () => clip ?? '');
+  return applyClipboardVar(text, clip);
 }
 
 async function doPaste(text: string, promptId?: string) {
@@ -245,10 +252,14 @@ async function doCopy(text: string, promptId?: string) {
     await api.copyText(finalText);
     if (promptId) await api.recordUse(promptId).catch((e) => console.warn('[prompt-tool] 用量记录失败:', e));
     showToast('已复制到剪贴板');
-    setTimeout(() => api.hideQuick(), 350);
+    setTimeout(() => api.hideQuick().catch((e) => console.warn('[prompt-tool] 隐藏面板失败:', e)), 350);
   } catch (e) {
     showToast(String(e), 'err');
   }
+}
+
+function openManager() {
+  api.openManager().catch((e) => console.warn('[prompt-tool] 打开管理窗口失败:', e));
 }
 
 function activate(item: Prompt | ClipboardItem, copyOnly: boolean) {
@@ -276,18 +287,20 @@ function onKeydown(e: KeyboardEvent) {
   if (e.isComposing || e.keyCode === 229) return;
   if (varDialogPrompt.value) return;
   if (detailOpen.value) {
-    // 全文浮层打开时：Esc / ← 关闭，其余不响应
+    // 全文浮层打开时：Esc / ← 关闭；Ctrl/Meta 组合放行——
+    // .detail-body 特意支持选中文本，吞掉 Ctrl+C/Ctrl+A 的 keydown 默认行为
+    // 会让 Chromium 不派发 copy 事件，浮层内无法键盘复制（评审 2026-09-10 I1）
     if (e.key === 'Escape' || e.key === 'ArrowLeft') {
       e.preventDefault();
       detailOpen.value = false;
-    } else if (e.key !== 'Tab') {
+    } else if (e.key !== 'Tab' && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
     }
     return;
   }
   if (e.key === 'Escape') {
     e.preventDefault();
-    api.hideQuick();
+    api.hideQuick().catch((e) => console.warn('[prompt-tool] 隐藏面板失败:', e));
   } else if (e.key === 'ArrowDown') {
     e.preventDefault();
     if (items.value > 0) active.value = (active.value + 1) % items.value;
@@ -298,8 +311,13 @@ function onKeydown(e: KeyboardEvent) {
     e.preventDefault();
     mode.value = mode.value === 'prompts' ? 'clipboard' : 'prompts';
   } else if (e.key === 'ArrowRight') {
-    const el = e.target as HTMLInputElement;
-    const atEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
+    // 焦点不在搜索框（如刚点过分类 chip/模式切换按钮）时没有光标位置，
+    // 视同"已在末尾"，允许 → 打开全文浮层（评审 2026-09-10 M-views#7）
+    const el = e.target;
+    const atEnd =
+      !(el instanceof HTMLInputElement) ||
+      el.selectionStart === null ||
+      (el.selectionStart === el.value.length && el.selectionEnd === el.value.length);
     if (atEnd && activeText.value) {
       e.preventDefault();
       detailOpen.value = true;
@@ -350,7 +368,15 @@ onMounted(async () => {
     // 冷启动时事件可能先于首次 load 到达，确保数据已就绪再查找
     if (!data.value) await load();
     const p = data.value?.prompts.find((x) => x.id === e.payload);
-    if (p) varDialogPrompt.value = p;
+    if (!p) return;
+    // 与面板 Enter 路径同口径（评审 2026-09-10 M-views#8）：Rust 侧 has_vars
+    // 把 {{clipboard}} 也算变量而此处不算，只有手动变量才弹表单，
+    // 否则会弹出「0 个变量」的空表单要求用户再按一次 Enter
+    if (hasManualVars(p.content)) {
+      varDialogPrompt.value = p;
+    } else {
+      void doPaste(p.content, p.id);
+    }
   });
   // 高度自适应：同时观察根元素（窗口变化）与列表内层（内容变化）——
   // 窗口被最小高度托底且内容再增长时根元素尺寸不变，只有内层会变；
@@ -389,7 +415,7 @@ onBeforeUnmount(() => {
         />
       </div>
       <Segmented v-model="mode" :options="modeOptions" />
-      <button class="icon-btn" title="管理窗口" aria-label="打开管理窗口" @click="api.openManager()">
+      <button class="icon-btn" title="管理窗口" aria-label="打开管理窗口" @click="openManager">
         <SettingsIcon :size="16" />
       </button>
     </div>

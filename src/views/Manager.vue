@@ -80,15 +80,30 @@ function winClose() {
 /* 自管标题栏拖拽：不用 data-tauri-drag-region，因为其 start_dragging 在
    最大化窗口上不会先还原，拖拽会完全无效果（无法变尺寸）。原生惯例是
    最大化时拖动标题栏 = 还原窗口并跟随鼠标。 */
+/* 双击判定收敛在 mousedown 内：startDragging 的原生拖拽模态循环会吞掉
+   后续 dblclick 事件，两个 handler 竞争最大化状态（评审 2026-09-10 I3）。
+   语义对齐 Windows 原生：普通窗口快速双击 = 最大化；最大化窗口的首次
+   按下已还原（即双击还原的最终效果），紧随的第二次按下不再切回最大化 */
+let lastTitlePressAt = 0;
+let lastPressWasRestore = false;
 async function onTitlebarMouseDown(e: MouseEvent) {
   if (e.button !== 0) return;
   if ((e.target as HTMLElement).closest('button')) return;
   e.preventDefault();
-  if (await win.isMaximized()) await win.unmaximize();
+  const now = Date.now();
+  const doublePress = now - lastTitlePressAt < 400 && !lastPressWasRestore;
+  lastTitlePressAt = now;
+  lastPressWasRestore = false;
+  if (doublePress) {
+    lastTitlePressAt = 0;
+    winToggleMaximize();
+    return;
+  }
+  if (await win.isMaximized()) {
+    await win.unmaximize();
+    lastPressWasRestore = true;
+  }
   await win.startDragging();
-}
-function onTitlebarDoubleClick() {
-  winToggleMaximize();
 }
 
 function toast(msg: string, kind: 'ok' | 'err' = 'ok', action?: ToastAction, ms?: number) {
@@ -134,14 +149,21 @@ provide(managerKey, { data, refresh, toast, confirm, setLeaveGuard });
 
 let unlisten: (() => void) | undefined;
 let unlistenSync: (() => void) | undefined;
+let unlistenPaste: (() => void) | undefined;
 
-/** Ctrl+K 聚焦搜索：当前页没有搜索框时先切回提示词页 */
-function onKeydown(e: KeyboardEvent) {
+/** Ctrl+K 聚焦搜索：当前页没有搜索框时先切回提示词页。
+ *  必须走 switchTab：直接赋值会绕过 leaveGuard，未保存表单静默丢弃
+ *  （评审 2026-09-10 I2） */
+async function onKeydown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault();
     if (tab.value !== 'prompts' && tab.value !== 'clipboard') {
-      tab.value = 'prompts';
-      nextTick(() => window.dispatchEvent(new CustomEvent('pm-focus-search')));
+      await switchTab('prompts');
+      // 守卫确认放弃离开时 tab 未变，不派发聚焦事件
+      //（as TabId：TS 无法跨 await 跟踪 switchTab 的副作用，需显式放宽）
+      if ((tab.value as TabId) === 'prompts') {
+        nextTick(() => window.dispatchEvent(new CustomEvent('pm-focus-search')));
+      }
     } else {
       window.dispatchEvent(new CustomEvent('pm-focus-search'));
     }
@@ -164,7 +186,8 @@ async function autoCheckUpdate() {
     lastAutoUpdate.value = st; // 交给设置页消费（F3）：点「去更新」后更新区直接展示，无需二次检查
     toast(`发现新版本 v${st.version}`, 'ok', {
       label: '去更新',
-      handler: () => { tab.value = 'settings'; },
+      // 与 Ctrl+K 同根因：必须走 switchTab 过守卫，否则编辑中的内容静默丢失（I2）
+      handler: () => { void switchTab('settings'); },
     }, 8000);
   } catch { /* 自动检查失败静默（F2） */ }
 }
@@ -201,6 +224,11 @@ onMounted(async () => {
       }
     },
   );
+  // 按键注入失败（SendInput 被目标窗口/系统拒绝）只能异步上报：
+  // invoke_paste 返回时注入尚未发生（评审 2026-09-10 I21）
+  unlistenPaste = await listen<string>('paste-failed', (e) => {
+    if (e.payload) toast(String(e.payload), 'err', undefined, 6000);
+  });
   // 启动自动检查更新：延后 3s，避免挤占首屏加载
   updateTimer = setTimeout(autoCheckUpdate, 3000);
 });
@@ -208,6 +236,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown);
   unlisten?.();
   unlistenSync?.();
+  unlistenPaste?.();
   clearTimeout(updateTimer);
   clearTimeout(toastTimer);
 });
@@ -228,7 +257,6 @@ const tabs = [
       class="tb"
       title="拖动移动窗口，双击最大化/还原"
       @mousedown="onTitlebarMouseDown"
-      @dblclick="onTitlebarDoubleClick"
     >
       <span class="tb-name">Prompt Tool 提示词助手</span>
       <span class="grow" />
