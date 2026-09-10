@@ -272,8 +272,12 @@ pub fn persist(
     for (account, field) in cred_fields(data) {
         let slot = memo.slot(account);
         if field.is_empty() {
-            // 清空的凭据：顺带从凭据库删除（失败忽略，条目残留无泄漏风险）
-            let _ = backend.delete(account);
+            // 清空的凭据：顺带从凭据库删除（失败忽略，条目残留无泄漏风险）。
+            // memo 已是 None 说明此前已删除过，跳过（评审 2026-09-10 M7#7）：
+            // 剪贴板捕获每次都 save，无条件 delete 会持续放大凭据库调用面
+            if slot.is_some() {
+                let _ = backend.delete(account);
+            }
             *slot = None;
         } else if *field == CRED_SENTINEL {
             // restore 时凭据库读取失败会保留哨兵：真值仍在凭据库里，
