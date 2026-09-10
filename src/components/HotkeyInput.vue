@@ -79,6 +79,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCaptureKeydown, tr
       aria-label="点击录制快捷键"
       @click="capturing = true"
       @keydown.enter="capturing = true"
+      @keydown.space.prevent="capturing = true"
     >
       <KeyCap v-if="modelValue" :combo="modelValue" />
       <span v-else class="key-empty">{{ capturing ? '按下新组合，Esc 取消' : '未设置 · 点击录制' }}</span>
@@ -97,7 +98,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCaptureKeydown, tr
   </span>
 
   <Teleport to="body">
-    <div v-if="capturing" class="cap-mask" @mousedown.self="capturing = false">
+    <!-- 遮罩用 click 而非 mousedown 关闭（评审 2026-09-10 I9）：本浮层无离场过渡，
+         mousedown 瞬间移除会让 mouseup 的 click 落到底层 key-slot（浮层关了又弹开）
+         或清除按钮（误清快捷键）；存活到完整 click 时鼠标事件始终落在遮罩上 -->
+    <div v-if="capturing" class="cap-mask" @click.self="capturing = false">
       <div class="cap-card fade-up">
         <div class="cap-title">请按下新的快捷键</div>
         <div class="cap-hint mono">{{ placeholder || hotkeyHint }}</div>

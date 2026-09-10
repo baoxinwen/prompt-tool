@@ -39,67 +39,93 @@ async function load() {
   }
 }
 
-async function saveSettingsPart(mutate: (s: import('../types').Settings) => void, okMsg: string) {
+/** @returns 保存是否成功：乐观更新（先翻转本地开关再保存）的调用方在失败时
+ *  必须回滚 UI——catch 只 toast 不回滚会让开关与持久化状态持续分叉，
+ *  下次任意设置的全量写回还会把该变更静默丢弃（评审 2026-09-10 I6） */
+async function saveSettingsPart(mutate: (s: import('../types').Settings) => void, okMsg: string): Promise<boolean> {
   // 串行化：两次快速变更交叠时，后发者必须等前一次 refresh 完成后再读快照，
   // 否则会用旧快照整体写回，把已持久化的变更静默回滚（评审 I3）
-  await enqueueSettingsSave(async () => {
+  return enqueueSettingsSave(async (): Promise<boolean> => {
     const s = ctx.data.value?.settings;
-    if (!s) return;
+    if (!s) return false;
     try {
       const next = JSON.parse(JSON.stringify(s)) as import('../types').Settings;
       mutate(next);
       await api.saveSettings(next);
       await ctx.refresh();
       ctx.toast(okMsg);
+      return true;
     } catch (e) {
       ctx.toast(String(e), 'err');
+      return false;
     }
   });
 }
 
 function onHotkeyChange(v: string) {
+  const prev = hotkey.value;
   hotkey.value = v;
-  saveSettingsPart((s) => (s.hotkey = v), '主快捷键已更新');
+  void saveSettingsPart((s) => (s.hotkey = v), '主快捷键已更新').then((ok) => {
+    if (!ok) hotkey.value = prev;
+  });
 }
 
 function onCaptureHotkeyChange(v: string) {
+  const prev = captureHotkey.value;
   captureHotkey.value = v;
-  saveSettingsPart((s) => (s.captureHotkey = v), '捕获快捷键已更新');
+  void saveSettingsPart((s) => (s.captureHotkey = v), '捕获快捷键已更新').then((ok) => {
+    if (!ok) captureHotkey.value = prev;
+  });
 }
 
 function onThemeChange(v: string) {
+  const prev = theme.value;
   theme.value = v;
-  saveSettingsPart((s) => (s.theme = v), '主题已更新');
+  void saveSettingsPart((s) => (s.theme = v), '主题已更新').then((ok) => {
+    if (!ok) theme.value = prev;
+  });
 }
 
 function onRestoreClipboardChange() {
-  const next = !restoreClipboard.value;
+  const prev = restoreClipboard.value;
+  const next = !prev;
   restoreClipboard.value = next;
-  saveSettingsPart(
+  void saveSettingsPart(
     (s) => (s.restoreClipboard = next),
     next ? '已开启粘贴后恢复剪贴板' : '已关闭粘贴后恢复剪贴板',
-  );
+  ).then((ok) => {
+    if (!ok) restoreClipboard.value = prev;
+  });
 }
 
 function onPasteAppendEnterChange() {
-  const next = !pasteAppendEnter.value;
+  const prev = pasteAppendEnter.value;
+  const next = !prev;
   pasteAppendEnter.value = next;
-  saveSettingsPart(
+  void saveSettingsPart(
     (s) => (s.pasteAppendEnter = next),
     next ? '已开启粘贴后自动回车' : '已关闭粘贴后自动回车',
-  );
+  ).then((ok) => {
+    if (!ok) pasteAppendEnter.value = prev;
+  });
 }
 
 function onCaptureClipboardChange() {
-  const next = !captureClipboard.value;
+  const prev = captureClipboard.value;
+  const next = !prev;
   captureClipboard.value = next;
-  saveSettingsPart((s) => (s.captureClipboard = next), next ? '已开启剪贴板记录' : '已关闭剪贴板记录');
+  void saveSettingsPart((s) => (s.captureClipboard = next), next ? '已开启剪贴板记录' : '已关闭剪贴板记录').then((ok) => {
+    if (!ok) captureClipboard.value = prev;
+  });
 }
 
 function onAutoUpdateCheckChange() {
-  const next = !autoUpdateCheck.value;
+  const prev = autoUpdateCheck.value;
+  const next = !prev;
   autoUpdateCheck.value = next;
-  saveSettingsPart((s) => (s.autoUpdateCheck = next), next ? '已开启自动检查更新' : '已关闭自动检查更新');
+  void saveSettingsPart((s) => (s.autoUpdateCheck = next), next ? '已开启自动检查更新' : '已关闭自动检查更新').then((ok) => {
+    if (!ok) autoUpdateCheck.value = prev;
+  });
 }
 
 async function toggleAutostart() {
@@ -235,7 +261,9 @@ onMounted(() => {
         </div>
         <label class="opt">
           <span>数据目录<small class="faint">data.json 保存了全部提示词与配置</small></span>
-          <button @click="api.openDataDir()"><FolderOpen :size="13" /> 打开目录</button>
+          <button
+            @click="api.openDataDir().catch((e) => ctx.toast(String(e), 'err'))"
+          ><FolderOpen :size="13" /> 打开目录</button>
         </label>
       </div>
 

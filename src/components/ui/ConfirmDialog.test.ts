@@ -52,6 +52,27 @@ describe('ConfirmDialog：模态键盘语义', () => {
     wrapper.unmount();
   });
 
+  // 评审 2026-09-10 I8：按住 Enter 的键盘自动重复不得驱动确认链——
+  // 对话框打开后焦点自动落在确认键上，auto-repeat 的 Enter 会在用户
+  // 看清对话框前直接「确认」危险操作（如清空历史）
+  it('Enter 键盘自动重复（repeat）不得触发确认，正常按键不受影响', async () => {
+    const wrapper = await mountDialog();
+    const confirmBtn = wrapper.find('.cd-confirm').element;
+    keydown(confirmBtn, { key: 'Enter', repeat: true });
+    expect(wrapper.emitted('confirm')).toBeUndefined();
+
+    keydown(confirmBtn, { key: 'Enter' });
+    expect(wrapper.emitted('confirm')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it('Esc 键盘自动重复不得触发取消', async () => {
+    const wrapper = await mountDialog();
+    keydown(document.body, { key: 'Escape', repeat: true });
+    expect(wrapper.emitted('cancel')).toBeUndefined();
+    wrapper.unmount();
+  });
+
   it('焦点在取消按钮上按 Enter：取消而非确认', async () => {
     const wrapper = await mountDialog();
     const cancelBtn = wrapper.find('.cd-btn:not(.cd-confirm)').element as HTMLElement;

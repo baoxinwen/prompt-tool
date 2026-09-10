@@ -130,6 +130,25 @@ describe('HotkeyInput：快捷键录制', () => {
     wrapper.unmount();
   });
 
+  // 评审 2026-09-10 I9：遮罩若在 mousedown 瞬间移除（无过渡、无 up 保护），
+  // 松开会把 click 落到底层 key-slot（重新弹开）或清除键（误清快捷键）。
+  // 遮罩必须存活到完整 click 才关闭
+  it('遮罩用 click 而非 mousedown 关闭：按下瞬间浮层不消失', async () => {
+    const wrapper = mount(HotkeyInput, { props: { modelValue: '' }, attachTo: document.body });
+    await wrapper.find('.key-slot').trigger('click');
+    const mask = document.querySelector('.cap-mask')!;
+    expect(mask).toBeTruthy();
+
+    mask.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await wrapper.vm.$nextTick();
+    expect(document.querySelector('.cap-mask'), 'mousedown 瞬间浮层不得消失').toBeTruthy();
+
+    mask.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await wrapper.vm.$nextTick();
+    expect(document.querySelector('.cap-mask')).toBeNull();
+    wrapper.unmount();
+  });
+
   it('橡皮擦清除：aria/title=清除快捷键，点击发出空值并回到空态文案', async () => {
     const wrapper = mount(HotkeyInput, { props: { modelValue: 'ctrl+k' } });
     const eraser = wrapper.find('button[aria-label="清除快捷键"]');

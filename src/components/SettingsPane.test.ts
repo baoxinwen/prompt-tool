@@ -147,4 +147,22 @@ describe('SettingsPane：设置读写', () => {
       kind: 'err',
     });
   });
+
+  // 评审 2026-09-10 I6：乐观翻转的开关在保存失败时必须回滚 UI，
+  // 否则开关与持久化状态分叉，下次任意设置的全量写回会把该变更静默丢弃
+  it('保存失败时回滚开关 UI，状态与持久化不分叉', async () => {
+    mockedApi.saveSettings.mockRejectedValueOnce('磁盘写入失败');
+    const { wrapper, ctx } = await mountPane();
+    const sw = switchByLabel(wrapper, '记录剪贴板');
+    expect((sw.element as HTMLInputElement).checked).toBe(true);
+
+    await sw.setValue(false);
+    await flushPromises();
+
+    expect((sw.element as HTMLInputElement).checked).toBe(true);
+    expect(ctx.toasts[ctx.toasts.length - 1]).toMatchObject({
+      msg: expect.stringContaining('磁盘写入失败'),
+      kind: 'err',
+    });
+  });
 });

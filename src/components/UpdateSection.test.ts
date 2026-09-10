@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils';
 import { ref } from 'vue';
 import UpdateSection from './UpdateSection.vue';
 import { api } from '../lib/api';
-import { lastAutoUpdate } from '../lib/updateCache';
+import { lastAutoUpdate, resetUpdateState } from '../lib/updateCache';
 import { managerKey, type ManagerCtx } from '../lib/context';
 import type { AppData, Settings, UpdateProgress } from '../types';
 
@@ -48,6 +48,7 @@ const mountSection = () =>
 beforeEach(() => {
   vi.clearAllMocks();
   lastAutoUpdate.value = null; // 模块级缓存，测试间必须复位
+  resetUpdateState(); // 更新状态机也是模块级（I7），同样必须复位
 });
 
 describe('UpdateSection', () => {
@@ -189,5 +190,29 @@ describe('UpdateSection', () => {
     expect(w.find('.progress').exists()).toBe(true);
     expect(w.text()).toContain('已下载 1.5 MB');
     expect(w.text()).not.toContain('下载中 0%');
+  });
+
+  // 评审 2026-09-10 I7：下载中卸载组件（切页）不得丢失状态——
+  // 重挂载后 phase 仍在 downloading，不得二次触发 download_and_install
+  it('下载中卸载后重挂载：phase 保持下载中，不重复触发下载', async () => {
+    mockedApi.checkUpdate.mockResolvedValue({ kind: 'available', version: '1.1.0', notes: '' });
+    mockedApi.onUpdateProgress.mockImplementation(async () => () => {});
+    mockedApi.downloadAndInstallUpdate.mockReturnValue(new Promise<void>(() => {}));
+
+    const w1 = mountSection();
+    await w1.find('button.check').trigger('click');
+    await flushPromises();
+    await w1.find('button.install').trigger('click');
+    await flushPromises();
+    w1.unmount(); // 切页卸载：后端下载仍在进行
+
+    const w2 = mountSection(); // 回到设置页重挂载
+    await flushPromises();
+    expect(w2.find('.progress').exists()).toBe(true); // phase 仍为 downloading，进度区可见
+
+    await w2.find('button.install').trigger('click');
+    await flushPromises();
+    expect(mockedApi.downloadAndInstallUpdate).toHaveBeenCalledTimes(1); // 不得二次触发
+    w2.unmount();
   });
 });

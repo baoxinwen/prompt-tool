@@ -265,10 +265,12 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
     <div class="sync-body">
       <!-- v3：整页一张卡，左侧 3px 状态饰条 -->
       <div class="onecard card">
-        <!-- 后端切换：单卡第一行——provider 决定下方状态/开关/表单 -->
+        <!-- 后端切换：单卡第一行——provider 决定下方状态/开关/表单。
+             同步进行中禁切：切换后状态徽章/表单与实际在同步的后端不一致（M3#4） -->
         <Segmented
           :model-value="provider"
           :options="providerOptions"
+          :disabled="syncing"
           @update:model-value="switchProvider"
         />
 
@@ -436,7 +438,7 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 
         <!-- 卡底操作行 -->
         <div class="btns">
-          <button :disabled="testing" @click="test">{{ testing ? '测试中…' : '测试连接' }}</button>
+          <button :disabled="testing || syncing" @click="test">{{ testing ? '测试中…' : '测试连接' }}</button>
           <AccentButton :disabled="testing || syncing" @click="save()">保存配置</AccentButton>
         </div>
 

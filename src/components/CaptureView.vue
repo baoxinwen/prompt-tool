@@ -71,6 +71,9 @@ function onKeydown(e: KeyboardEvent) {
   if (e.isComposing || e.keyCode === 229) return;
   if (e.key === 'Escape') {
     e.preventDefault();
+    // 保存进行中不立即关窗（评审 2026-09-10 M4#7）：await 期间关窗会
+    // 销毁 saveErr 的展示位置，保存失败时用户误以为已保存
+    if (saving.value) return;
     closeWindow();
   } else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'Enter')) {
     e.preventDefault();
@@ -80,6 +83,7 @@ function onKeydown(e: KeyboardEvent) {
 
 let unlistenText: (() => void) | undefined;
 let unlistenData: (() => void) | undefined;
+let disposed = false;
 
 onMounted(async () => {
   await load();
@@ -87,13 +91,23 @@ onMounted(async () => {
   // 键盘语义挂 window 而非组件根元素：点击非可聚焦区后焦点落 body，
   // keydown 不经过组件子树，Esc/Ctrl+S 会静默失效（评审 I5）
   window.addEventListener('keydown', onKeydown);
-  unlistenText = await listen<string>('capture-text', (e) => {
+  const ut = await listen<string>('capture-text', (e) => {
     reset(e.payload ?? '');
     titleInput.value?.focus();
   });
-  unlistenData = await listen('data-changed', load);
+  const ud = await listen('data-changed', load);
+  // 卸载早于 listen resolve（HMR/快速关窗）时立即注销，
+  // 避免监听器跨挂载泄漏（评审 2026-09-10 M4#13，与 DataPane 同型修复）
+  if (disposed) {
+    ut();
+    ud();
+    return;
+  }
+  unlistenText = ut;
+  unlistenData = ud;
 });
 onBeforeUnmount(() => {
+  disposed = true;
   window.removeEventListener('keydown', onKeydown);
   unlistenText?.();
   unlistenData?.();
@@ -126,8 +140,10 @@ onBeforeUnmount(() => {
     />
     <div v-if="saveErr" class="cv-err-row" role="alert">{{ saveErr }}</div>
     <div class="cv-foot">
+      <!-- 「未分类」可能是 data.categories 的真实成员（删除分类后端会 ensure_category），
+           v-for 里过滤掉，避免重复 option 与重复 key（评审 2026-09-10 M4#3） -->
       <select v-model="category">
-        <option v-for="c in data?.categories ?? []" :key="c" :value="c">{{ c }}</option>
+        <option v-for="c in data?.categories.filter((c) => c !== '未分类') ?? []" :key="c" :value="c">{{ c }}</option>
         <option value="未分类">未分类</option>
       </select>
       <span class="grow" />

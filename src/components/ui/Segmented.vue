@@ -1,17 +1,24 @@
 <script setup lang="ts">
 /** 分段选择器 */
-defineProps<{ options: { id: string; label: string }[]; modelValue: string }>();
+defineProps<{
+  options: { id: string; label: string }[];
+  modelValue: string;
+  /** 整组禁用（如同步进行中禁切 provider，评审 M3#4） */
+  disabled?: boolean;
+}>();
 const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>();
 </script>
 
 <template>
-  <div class="seg">
+  <div class="seg" :class="{ disabled }" role="tablist">
     <button
       v-for="o in options"
       :key="o.id"
       type="button"
       class="seg-item"
       :class="{ on: modelValue === o.id }"
+      :disabled="disabled"
+      :aria-pressed="modelValue === o.id"
       @click="emit('update:modelValue', o.id)"
     >
       {{ o.label }}
@@ -49,6 +56,11 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>();
   color: var(--text);
   font-weight: 600;
   box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.seg.disabled {
+  opacity: 0.55;
+  pointer-events: none;
 }
 
 :root[data-theme='light'] .seg-item.on {

@@ -46,12 +46,18 @@ async function importData() {
 }
 
 async function importDropped(paths: string[]) {
+  // 与按钮导入共用 importing 互斥（评审 2026-09-10 M4#9）：
+  // 两条路径并发会让 refresh/toast 交错、状态显示失真
+  if (importing.value) return;
+  importing.value = true;
   try {
     const r = await api.importPaths(paths);
     ctx.toast(r.message, r.message.includes('失败') ? 'err' : 'ok');
     await ctx.refresh();
   } catch (e) {
     ctx.toast(String(e), 'err');
+  } finally {
+    importing.value = false;
   }
 }
 
@@ -142,7 +148,7 @@ onBeforeUnmount(() => {
           <span>提示词 <b class="tnum">{{ promptCount }}</b></span>
           <span>剪贴板文本 <b class="tnum">{{ clipTextCount }}</b></span>
           <span class="grow" />
-          <button @click="api.openDataDir()"><FolderOpen :size="13" /> 打开数据目录</button>
+          <button @click="api.openDataDir().catch((e) => ctx.toast(String(e), 'err'))"><FolderOpen :size="13" /> 打开数据目录</button>
         </div>
       </div>
     </div>

@@ -134,6 +134,9 @@ async function toggleCapture() {
 // Ctrl+K 聚焦搜索；浮层打开时 Esc / ← 关闭
 function onKeydown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    // 详情浮层打开时不抢焦点（评审 2026-09-10 M4#5）：焦点进入被
+    // 遮罩挡住的搜索框会让用户键入"消失"，表现为键盘失灵
+    if (detailItem.value) return;
     e.preventDefault();
     searchInput.value?.focus();
     return;

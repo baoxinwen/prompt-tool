@@ -21,6 +21,10 @@ const confirmBtn = ref<HTMLButtonElement | null>(null);
 
 function onKeydown(e: KeyboardEvent) {
   if (!props.open) return;
+  // 键盘自动重复不得驱动确认/取消：按住 Enter 时第一次 keydown 打开对话框后，
+  // 焦点已被 watch 移入确认键，auto-repeat 的 Enter 会在用户看清对话框前
+  // 直接「确认」危险操作（评审 2026-09-10 I8）。Tab 除外：长按循环焦点合法
+  if (e.repeat && e.key !== 'Tab') return;
   // 模态打开期间在捕获阶段拦截一切按键并向下游传播：
   // 背景快捷键（Ctrl+K 聚焦搜索、Ctrl+S 保存等）全部失效，
   // 否则焦点被切到遮罩后的输入框时，用户按 Enter 想执行搜索

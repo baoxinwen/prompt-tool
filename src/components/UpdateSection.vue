@@ -1,22 +1,30 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted } from 'vue';
 import { RefreshCw } from 'lucide-vue-next';
 import { api } from '../lib/api';
-import { lastAutoUpdate } from '../lib/updateCache';
+import {
+  lastAutoUpdate,
+  updatePhase,
+  updateInfo,
+  updateErrMsg,
+  updateErrorKind,
+  updateProgress,
+} from '../lib/updateCache';
 import { enqueueSettingsSave } from '../lib/settingsSave';
 import { managerKey } from '../lib/context';
-import type { Settings, UpdateProgress, UpdateStatus } from '../types';
+import type { Settings, UpdateProgress } from '../types';
 
 const ctx = inject(managerKey)!;
 // 由 vite define 注入，与 package.json / tauri.conf.json 同源
 const appVersion = __APP_VERSION__;
 
-type Phase = 'idle' | 'checking' | 'available' | 'downloading' | 'installing' | 'uptodate' | 'error';
-const phase = ref<Phase>('idle');
-const info = ref<Extract<UpdateStatus, { kind: 'available' }> | null>(null);
-const errMsg = ref('');
-const errorKind = ref('');
-const progress = ref<UpdateProgress | null>(null);
+// 状态机在 updateCache.ts 模块级（评审 2026-09-10 I7）：下载中切页卸载本组件
+// 后重挂载，phase/进度仍在，不会误判空闲而二次触发下载
+const phase = updatePhase;
+const info = updateInfo;
+const errMsg = updateErrMsg;
+const errorKind = updateErrorKind;
+const progress = updateProgress;
 let unlisten: (() => void) | null = null;
 
 const ERROR_TEXT: Record<string, string> = {
@@ -24,6 +32,21 @@ const ERROR_TEXT: Record<string, string> = {
   signature: '更新包签名校验失败：为安全起见已中止，请去发布页手动下载',
   unknown: '更新失败',
 };
+
+function onProgress(p: UpdateProgress) {
+  progress.value = p;
+  if (p.percent !== null && p.percent >= 100) phase.value = 'installing';
+}
+
+/** 下载/安装中重挂载（切页回来）：重新订阅进度事件，恢复进度显示 */
+async function resubscribeProgress() {
+  try {
+    unlisten?.();
+    unlisten = await api.onUpdateProgress(onProgress);
+  } catch {
+    /* 订阅失败保留已有进度显示，下载本身不受影响 */
+  }
+}
 
 async function check() {
   // 下载/安装进行中不允许重新检查：避免状态机被拉回、旧 unlisten 泄漏
@@ -49,15 +72,13 @@ async function check() {
 }
 
 async function install() {
+  // phase 在模块级：即使本组件曾被卸载重挂，下载中的 phase 也拦得住二次触发（I7）
   if (!info.value || phase.value === 'downloading' || phase.value === 'installing') return;
   phase.value = 'downloading';
   progress.value = null;
   try {
     // 订阅必须在 try 内：listen 失败若悬在 try 外会成为未处理 rejection，且 phase 卡死 downloading
-    unlisten = await api.onUpdateProgress((p) => {
-      progress.value = p;
-      if (p.percent !== null && p.percent >= 100) phase.value = 'installing';
-    });
+    unlisten = await api.onUpdateProgress(onProgress);
     await api.downloadAndInstallUpdate();
     // 正常情况下进程重启、走不到这里；走到这里说明安装器已交管，按安装中处理
     phase.value = 'installing';
@@ -104,7 +125,13 @@ const progressText = computed(() => {
 // 不做 skip 过滤——设置页常驻展示不受跳过影响（F8 语义，skip 过滤在 Manager 写入侧完成）
 onMounted(() => {
   const cached = lastAutoUpdate.value;
-  if (cached?.kind !== 'available') return;
+  if (cached?.kind !== 'available') {
+    // idle 之外可能是上次卸载时仍在下载/安装：重挂载后恢复进度订阅（I7）
+    if (phase.value === 'downloading' || phase.value === 'installing') {
+      void resubscribeProgress();
+    }
+    return;
+  }
   info.value = cached;
   phase.value = 'available';
   lastAutoUpdate.value = null; // 一次性消费
@@ -135,7 +162,13 @@ onBeforeUnmount(() => { unlisten?.(); unlisten = null; });
     </div>
 
     <div v-if="phase === 'downloading'" class="upd-progress">
-      <div class="progress"><span :style="{ width: (progress?.percent ?? 0) + '%' }" /></div>
+      <div
+        class="progress"
+        role="progressbar"
+        :aria-valuenow="progress?.percent ?? undefined"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      ><span :style="{ width: (progress?.percent ?? 0) + '%' }" /></div>
       <small class="faint">{{ progressText }}</small>
     </div>
 
