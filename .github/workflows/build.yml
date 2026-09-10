@@ -96,13 +96,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PRERELEASE_FLAG=""
-          if [[ "$GITHUB_REF_NAME" == *-* ]]; then PRERELEASE_FLAG="--prerelease"; fi
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --title "Prompt Tool $GITHUB_REF_NAME" \
-              $PRERELEASE_FLAG \
-              --notes "Prompt Tool $GITHUB_REF_NAME"
+          # Release 标题与描述沿用仓库惯例：标题为版本号，描述从 CHANGELOG.md
+          # 提取该版本段落（含版本标题行）；未找到段落时回退占位文案
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES_FILE="release-notes.md"
+          awk -v start="## [$VERSION]" '
+            found && /^## / && $0 != start { exit }
+            index($0, start) == 1 { found = 1 }
+            found { print }
+          ' CHANGELOG.md > "$NOTES_FILE"
+          if [ -s "$NOTES_FILE" ]; then
+            NOTES_ARGS=(--notes-file "$NOTES_FILE")
+          else
+            NOTES_ARGS=(--notes "Prompt Tool $GITHUB_REF_NAME")
+          fi
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"               --title "$GITHUB_REF_NAME"               "${NOTES_ARGS[@]}"               $PRERELEASE_FLAG
 
       # 构建 Windows NSIS 安装包；打 v* 标签推送时产物附加到 Release，
       # 普通推送仅构建（产物在 Actions 运行页下载）
