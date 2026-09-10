@@ -693,7 +693,9 @@ fn run_sync_inner(app: &AppHandle, direction: &str) -> Result<SyncReport, String
                 message: format!("已下载云端数据（{} 条提示词）", remote.prompts.len()),
             })
         }
-        _ => {
+        // 显式列出 merge（评审 2026-09-10 M7#13）：未知 direction 走末尾
+        // 报错分支而非静默回落——静默降级会掩盖前端的拼写错误
+        "merge" => {
             let mut remote = backend.fetch()?;
             // 用户关闭剪贴板同步时，不把云端剪贴板合并进本地
             if let Some(r) = &mut remote {

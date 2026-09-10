@@ -518,6 +518,13 @@ pub async fn clear_history(app: AppHandle) -> Result<usize, String> {
 #[tauri::command]
 pub fn restore_history(app: AppHandle) -> Result<usize, String> {
     let mut store = lock(&app);
+    restore_from_stash(&mut store)
+}
+
+/// 撤销恢复的落库逻辑（可测，评审 2026-09-10 I13）：必须走 commit 而非裸
+/// save——恢复改变了数据，不计入 mutations/dirty_unsynced 会让自动同步
+/// 漏传本轮变更，多设备 pull 时本机恢复的数据会被云端的清空状态再冲掉
+fn restore_from_stash(store: &mut crate::store::Store) -> Result<usize, String> {
     let Some(stashed) = store.stash.take() else {
         return Ok(0);
     };
@@ -536,7 +543,7 @@ pub fn restore_history(app: AppHandle) -> Result<usize, String> {
         store.data.clipboard.iter().map(|i| i.id.clone()).collect();
     store.data.tombstones.retain(|t| !live_ids.contains(&t.id));
     if restored > 0 {
-        store.save().map_err(|e| e.to_string())?;
+        store.commit()?;
     }
     Ok(restored)
 }
@@ -601,8 +608,24 @@ pub fn set_panel_height(app: AppHandle, height: f64) {
     }
 }
 
+/// 设置写入只接受管理窗口（评审 2026-09-10 I14）：get_data 对其他窗口
+/// 返回的是脱敏后的空凭据，若以其为基础整体写回，persist 会把系统凭据库
+/// 里的真实值删掉——后端必须自带防线，不能依赖前端调用点恰好都安全
+fn ensure_manager_window(label: &str) -> Result<(), String> {
+    if label == "manager" {
+        Ok(())
+    } else {
+        Err("设置只能在管理窗口修改".into())
+    }
+}
+
 #[tauri::command]
-pub async fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
+pub async fn save_settings(
+    app: AppHandle,
+    window: WebviewWindow,
+    settings: Settings,
+) -> Result<(), String> {
+    ensure_manager_window(window.label())?;
     tauri::async_runtime::spawn_blocking(move || {
         let (old_hotkey, old_capture_hotkey) = {
             let store = lock(&app);
@@ -934,6 +957,35 @@ mod tests {
     }
 
     // ---------- upsert_prompt ----------
+
+    // 评审 2026-09-10 I14：设置写入的窗口防线
+    #[test]
+    fn save_settings_only_from_manager_window() {
+        assert!(ensure_manager_window("manager").is_ok());
+        let err = ensure_manager_window("main").unwrap_err();
+        assert!(err.contains("管理窗口"), "拒绝信息应可操作: {err}");
+    }
+
+    // 评审 2026-09-10 I13：撤销恢复必须走 commit 记账，否则自动同步漏传，
+    // 多设备 pull 会把本机恢复的数据被云端清空状态再冲掉
+    #[test]
+    fn restore_from_stash_commits_mutation_accounting() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = crate::store::Store::test_store(dir.path());
+        store.stash = Some(vec![crate::models::ClipboardItem {
+            id: "h1".into(),
+            content: "text".into(),
+            copied_at: 1,
+            kind: "text".into(),
+            image: None,
+        }]);
+
+        let restored = restore_from_stash(&mut store).unwrap();
+        assert_eq!(restored, 1);
+        assert_eq!(store.mutations, 1, "必须计入 mutations（同步记账语义）");
+        assert!(store.dirty_unsynced, "必须置待同步标记");
+        assert!(dir.path().join("data.json").exists(), "恢复必须落盘");
+    }
 
     // 评审 2026-09-10 I23：导入文件大小上限的边界锁定
     #[test]

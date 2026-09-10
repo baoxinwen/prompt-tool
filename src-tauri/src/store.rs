@@ -81,22 +81,37 @@ fn load_or_recover_with(
             Some(text) => match serde_json::from_str::<AppData>(&text) {
                 Ok(d) => d,
                 Err(e) => {
-                    // 内容确实损坏才隔离：改名保留现场，空数据继续运行
+                    // 内容确实损坏才隔离：改名保留现场，空数据继续运行。
+                    // 隔离失败（占用/权限）必须进入只读保护现场（评审 2026-09-10 I12）：
+                    // 静默吞掉失败后，启动 save 会用新数据覆盖原地坏文件，
+                    // 用户本可抢救的数据永久丢失
                     let dir = path.parent().unwrap_or_else(|| Path::new("."));
                     let quarantined =
                         dir.join(format!("data.json.corrupt-{}", crate::models::now_ms()));
-                    let _ = std::fs::rename(path, &quarantined);
-                    eprintln!(
-                        "[prompt-tool] data.json 解析失败已隔离到 {}，以空数据启动: {e}",
-                        quarantined.display()
-                    );
-                    recovered_notice = Some(format!(
-                        "数据文件损坏，已隔离为 {}，本次以空数据启动。若存在 data.json.bak 可手动改名为 data.json 恢复",
-                        quarantined
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_default()
-                    ));
+                    match std::fs::rename(path, &quarantined) {
+                        Ok(()) => {
+                            eprintln!(
+                                "[prompt-tool] data.json 解析失败已隔离到 {}，以空数据启动: {e}",
+                                quarantined.display()
+                            );
+                            recovered_notice = Some(format!(
+                                "数据文件损坏，已隔离为 {}，本次以空数据启动。若存在 data.json.bak 可手动改名为 data.json 恢复",
+                                quarantined
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_default()
+                            ));
+                        }
+                        Err(re) => {
+                            eprintln!(
+                                "[prompt-tool] data.json 解析失败且隔离失败（{re}），进入只读模式: {e}"
+                            );
+                            recovered_notice = Some(format!(
+                                "数据文件损坏且无法隔离（{re}），本次以只读模式启动以保护原文件；请手动处理该文件后重启"
+                            ));
+                            read_failed = true;
+                        }
+                    }
                     AppData::default()
                 }
             },

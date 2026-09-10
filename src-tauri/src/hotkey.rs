@@ -329,7 +329,6 @@ mod tests {
 
     // ---------- sanitize_prompt_hotkeys ----------
 
-    #[test]
     // 评审 2026-09-10 M7#10：导入路径绕过 UI 的修饰键强制，裸键在此兜底清空
     #[test]
     fn sanitize_strips_bare_keys_without_modifier() {
@@ -343,6 +342,7 @@ mod tests {
         assert_eq!(data.prompts[2].hotkey, "ctrl+k", "带修饰键的合法组合保留");
     }
 
+    #[test]
     fn sanitize_clears_prompt_hotkey_conflicting_with_main_key() {
         let mut data = AppData::default(); // 默认主键 alt+q
         data.prompts.push(prompt_with_hotkey("p1", "Alt+Q", 5));
