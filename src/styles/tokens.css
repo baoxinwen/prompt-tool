@@ -112,6 +112,8 @@
   --ok-soft: rgba(130, 169, 107, 0.14);
   --warn: var(--signal-amber-dark);
   --warn-soft: rgba(217, 169, 78, 0.14);
+  /* 变量记号（{{名}} chip）：琥珀族，与 warn 同源但独立 token，便于后续分开调 */
+  --var: var(--signal-amber-dark);
 
   /* 交互 */
   --accent: var(--brand);
@@ -187,6 +189,9 @@
   --lt-ok-soft: rgba(74, 122, 64, 0.1);
   --lt-warn: var(--signal-amber);
   --lt-warn-soft: rgba(149, 100, 0, 0.1);
+  /* 变量记号（{{名}} chip）：评审 2026-09-10 I10——de9fb73 加了 --var 映射
+     却漏定义了 --lt-var，guaranteed-invalid 使 chip 在全部主题失去着色 */
+  --lt-var: var(--signal-amber);
 
   --lt-input-bg: var(--paper-0);
   --lt-input-focus-bg: var(--paper-0);

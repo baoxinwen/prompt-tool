@@ -70,4 +70,17 @@ describe.each([
     expect(t2).toBeGreaterThan(m);
     expect(m).toBeGreaterThan(f);
   });
+
+  // 评审 2026-09-10 I10 守卫：--var: var(--lt-var) 曾因 --lt-var 未定义而
+  // guaranteed-invalid，变量 chip 在全部主题失去着色。新增语义映射时必须
+  // 同时定义源令牌，且两套主题都要能解析出具体色值
+  it('变量记号令牌 --var 在两套主题都能解析为具体色值', () => {
+    for (const [name, props] of [
+      ['暗色', base],
+      ['亮色', new Map([...base, ...lightOverlay])],
+    ] as const) {
+      const v = resolve(props as Map<string, string>, '--var');
+      expect(v.trim(), `${name}主题 --var 应解析为具体色值`).toMatch(/^#/);
+    }
+  });
 });
