@@ -3,7 +3,10 @@ use std::time::Duration;
 /// 模拟粘贴/复制/回车按键：SendInput(Ctrl+V)。
 /// 本项目仅支持 Windows，按键注入直接使用 Win32 API（不保留跨平台桩）
 mod keys {
-    fn press_combo(vk_modifier: u16, vk_key: u16) {
+    /// 返回是否全部注入成功：SendInput 返回实际注入的事件数，被系统拒绝
+    /// （目标以管理员运行触发 UIPI、安全软件拦截）时少于请求数。静默吞掉
+    /// 会让粘贴整体无效果且无任何提示（评审 2026-09-10 I21）
+    fn press_combo(vk_modifier: u16, vk_key: u16) -> bool {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
             SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
         };
@@ -29,23 +32,25 @@ mod keys {
             key(vk_key, true),
             key(vk_modifier, true),
         ];
-        unsafe {
+        let sent = unsafe {
             SendInput(
                 inputs.len() as u32,
                 inputs.as_ptr(),
                 std::mem::size_of::<INPUT>() as i32,
-            );
-        }
+            )
+        };
+        sent == inputs.len() as u32
     }
 
-    pub fn press_paste() {
+    pub fn press_paste() -> bool {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_V;
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_CONTROL;
-        press_combo(VK_CONTROL, VK_V);
+        press_combo(VK_CONTROL, VK_V)
     }
 
-    /// 单键模拟（无修饰键），用于粘贴后追加回车
-    pub fn press_enter() {
+    /// 单键模拟（无修饰键），用于粘贴后追加回车。
+    /// keybd_event 无返回值可查，无法检测失败（Win32 API 限制）
+    pub fn press_enter() -> bool {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_RETURN;
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
             keybd_event, KEYEVENTF_KEYUP,
@@ -54,25 +59,26 @@ mod keys {
             keybd_event(VK_RETURN as u8, 0, 0, 0);
             keybd_event(VK_RETURN as u8, 0, KEYEVENTF_KEYUP, 0);
         }
+        true
     }
 
-    pub fn press_copy() {
+    pub fn press_copy() -> bool {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_C;
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_CONTROL;
-        press_combo(VK_CONTROL, VK_C);
+        press_combo(VK_CONTROL, VK_C)
     }
 }
 
-pub fn press_ctrl_v() {
-    keys::press_paste();
+pub fn press_ctrl_v() -> bool {
+    keys::press_paste()
 }
 
-pub fn press_enter() {
-    keys::press_enter();
+pub fn press_enter() -> bool {
+    keys::press_enter()
 }
 
-pub fn press_ctrl_c() {
-    keys::press_copy();
+pub fn press_ctrl_c() -> bool {
+    keys::press_copy()
 }
 
 /// 等待用户物理按住的修饰键（Alt/Ctrl/Shift）释放，最多等 timeout。
@@ -149,6 +155,12 @@ pub mod foreground {
     }
 }
 
+/// SendInput 被系统拒绝（目标以管理员运行触发 UIPI、安全软件拦截）时的
+/// 用户可操作提示：此时面板已隐藏、剪贴板已被提示词内容覆盖，静默失败
+/// 等于用户操作整体丢失（评审 2026-09-10 I21）
+const PASTE_INJECTED_ERR: &str =
+    "粘贴失败：目标窗口拒绝模拟按键（该应用可能以管理员权限运行）。请以相同权限重启本应用后重试";
+
 pub fn set_clipboard_text(text: &str) -> Result<(), String> {
     arboard::Clipboard::new()
         .and_then(|mut c| c.set_text(text.to_string()))
@@ -162,7 +174,7 @@ pub fn get_clipboard_text() -> Option<String> {
 /// 恢复目标窗口焦点并模拟粘贴（可选追加回车）。
 /// Windows 下在发送前校验目标确实回到前台，失败重试一次，仍失败则放弃——
 /// 固定延时无法保证焦点切换成功，盲发会把内容粘进恰好在前台的其他应用。
-pub fn send_paste(target: Option<isize>, append_enter: bool) {
+pub fn send_paste(target: Option<isize>, append_enter: bool) -> Result<(), String> {
     match target {
         Some(hwnd) => {
             std::thread::sleep(Duration::from_millis(60));
@@ -174,11 +186,18 @@ pub fn send_paste(target: Option<isize>, append_enter: bool) {
             }
             if !foreground::is_foreground(hwnd) {
                 eprintln!("[prompt-tool] 粘贴目标未回到前台，已取消按键以防误粘");
-                return;
+                return Ok(()); // 主动取消不视为注入失败
             }
-            // 等物理修饰键释放，防止注入组合被叠加成 Alt+Ctrl+V 等（评审 I14）
+            // 等物理修饰键释放，防止注入组合被叠加成 Alt+Ctrl+V 等（评审 I14）。
+            // 等待期间（最多 400ms）焦点可能被切走，注入前复检一次（M8#13）
             wait_modifiers_released(Duration::from_millis(400));
-            press_ctrl_v();
+            if !foreground::is_foreground(hwnd) {
+                eprintln!("[prompt-tool] 粘贴目标未回到前台，已取消按键以防误粘");
+                return Ok(());
+            }
+            if !press_ctrl_v() {
+                return Err(PASTE_INJECTED_ERR.to_string());
+            }
             if append_enter {
                 std::thread::sleep(Duration::from_millis(60));
                 press_enter();
@@ -187,13 +206,16 @@ pub fn send_paste(target: Option<isize>, append_enter: bool) {
         None => {
             std::thread::sleep(Duration::from_millis(200));
             wait_modifiers_released(Duration::from_millis(400));
-            press_ctrl_v();
+            if !press_ctrl_v() {
+                return Err(PASTE_INJECTED_ERR.to_string());
+            }
             if append_enter {
                 std::thread::sleep(Duration::from_millis(60));
                 press_enter();
             }
         }
     }
+    Ok(())
 }
 
 /// 后台粘贴核心：写入剪贴板（含恢复准备）→ 唤回目标窗口 → 模拟粘贴 → 按设置恢复原剪贴板。
@@ -225,7 +247,12 @@ pub fn paste_text(app: &tauri::AppHandle, text: &str) -> Result<(), String> {
     std::thread::spawn(move || {
         // 唤回呼出面板前的前台窗口（防止中间焦点被其他窗口抢走）
         let target = crate::store::lock(&handle).paste_target.take();
-        send_paste(target, append_enter);
+        if let Err(e) = send_paste(target, append_enter) {
+            // 注入失败发生在异步收尾线程：调用方早已收到 Ok，只能经事件
+            // 通道把错误送到前端 toast（Manager 监听 paste-failed）
+            eprintln!("[prompt-tool] {e}");
+            let _ = tauri::Emitter::emit(&handle, "paste-failed", e);
+        }
         // 代际已变：期间用户又发起了一次粘贴/复制，本会话不得再动剪贴板或解除抑制
         if crate::store::lock(&handle).paste_generation != generation {
             return;

@@ -7,6 +7,26 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
 /// 期间窗口仍不可见，仅靠 is_visible 挡不住快速二次触发
 static CAPTURE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
+/// RAII 在途标志（评审 2026-09-10 M8#14）：acquire 与复位点相距两个执行流，
+/// 手工复位在 spawn 线程永久阻塞/panic 时会漏掉，标志永挂 → 快速捕获
+/// 此后静默失效直到重启；Drop 保证任何路径（含 ?/panic 展开）都释放
+struct CaptureGuard;
+
+impl CaptureGuard {
+    fn acquire() -> Option<Self> {
+        CAPTURE_IN_FLIGHT
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for CaptureGuard {
+    fn drop(&mut self) {
+        CAPTURE_IN_FLIGHT.store(false, Ordering::SeqCst);
+    }
+}
+
 /// 快速捕获：模拟 Ctrl+C 抓取当前选中文本，弹出小窗让用户保存为新提示词
 pub fn start(app: &AppHandle) {
     // 已在捕获流程中（窗口已显示）时忽略重复触发
@@ -17,9 +37,9 @@ pub fn start(app: &AppHandle) {
     }
     // 复制尚在飞行中的二次触发同样忽略：此时剪贴板里已是上一次抓到的
     // 选中文本，second pass 会得到 latest == original 而捕获到空内容
-    if CAPTURE_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+    let Some(guard) = CaptureGuard::acquire() else {
         return;
-    }
+    };
 
     let original = crate::paste::get_clipboard_text();
     let generation = {
@@ -33,10 +53,21 @@ pub fn start(app: &AppHandle) {
     // 等物理修饰键释放：热键回调在按下瞬间触发，物理 Alt 未释放时
     // 注入的 Ctrl+C 会被叠加成 Alt+Ctrl+C，目标应用不当作复制（评审 I14）
     crate::paste::wait_modifiers_released(Duration::from_millis(400));
-    crate::paste::press_ctrl_c();
+    if !crate::paste::press_ctrl_c() {
+        // 注入被系统拒绝（UIPI/安全软件）：必须收尾还原，否则 CAPTURE_IN_FLIGHT
+        // 永挂导致快速捕获从此静默失效，剪贴板抑制也永不解除（评审 2026-09-10 I21）
+        eprintln!("[prompt-tool] 模拟 Ctrl+C 被系统拒绝，本次捕获取消");
+        {
+            let mut store = crate::store::lock(app);
+            store.release_suppress_if_current(generation);
+        }
+        drop(guard); // 显式释放后在途标志已复位
+        return;
+    }
 
     let handle = app.clone();
     std::thread::spawn(move || {
+        let _guard = guard; // 在途标志随线程体结束（或 panic）自动释放
         // 等目标应用响应 Ctrl+C 并写入剪贴板
         std::thread::sleep(Duration::from_millis(280));
         let latest = crate::paste::get_clipboard_text();
@@ -48,8 +79,7 @@ pub fn start(app: &AppHandle) {
         };
 
         show_capture_window(&handle);
-        // 窗口已显示：后续重入交给 is_visible 守卫
-        CAPTURE_IN_FLIGHT.store(false, Ordering::SeqCst);
+        // 窗口已显示：后续重入交给 is_visible 守卫（在途标志由 guard Drop 释放）
         let _ = handle.emit("capture-text", selected);
 
         // 代际已变：期间用户又发起了复制/粘贴/新捕获，本会话不得再恢复
@@ -94,5 +124,21 @@ fn show_capture_window(app: &AppHandle) {
 pub fn hide(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("capture") {
         let _ = win.hide();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 评审 2026-09-10 M8#14：在途标志必须互斥且任何退出路径都释放
+    #[test]
+    fn capture_guard_is_exclusive_and_releases_on_drop() {
+        {
+            let _g = CaptureGuard::acquire().expect("首次获取应成功");
+            assert!(CaptureGuard::acquire().is_none(), "持有期间二次获取必须被拒绝");
+        }
+        assert!(CaptureGuard::acquire().is_some(), "Drop 后必须自动释放");
+        CAPTURE_IN_FLIGHT.store(false, Ordering::SeqCst);
     }
 }

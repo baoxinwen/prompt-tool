@@ -131,8 +131,17 @@ fn record_text(app: &AppHandle, text: String) -> bool {
 }
 
 fn record_image(app: &AppHandle, width: u32, height: u32, rgba: &[u8]) -> bool {
-    let mut store = lock(app);
-    if store.suppress_clipboard || !store.data.settings.capture_clipboard {
+    // 快照抑制/开关状态后立即放锁（评审 2026-09-10 I20）：PNG 编码（4K 图
+    // 数百 ms）绝不能在持有全局 Store 锁的状态下做，否则监听线程持锁期间
+    // 所有走 lock() 的命令（get_data/粘贴/设置保存）排队阻塞，界面卡顿
+    let (suppressed, capture_on) = {
+        let store = lock(app);
+        (
+            store.suppress_clipboard,
+            store.data.settings.capture_clipboard,
+        )
+    };
+    if suppressed || !capture_on {
         return false;
     }
     let id = new_id();
@@ -141,6 +150,12 @@ fn record_image(app: &AppHandle, width: u32, height: u32, rgba: &[u8]) -> bool {
         return false;
     };
 
+    let mut store = lock(app);
+    // 重新校验：编码期间可能有新的粘贴/复制会话开启了抑制，迟到的图片不入库
+    if store.suppress_clipboard || !store.data.settings.capture_clipboard {
+        crate::images::delete_files(app, &id);
+        return false;
+    }
     store.data.clipboard.insert(
         0,
         ClipboardItem {

@@ -33,31 +33,52 @@ pub struct Store {
     /// Store 整体已在 Mutex 之后，无需再嵌套锁；被覆盖或应用退出时
     /// 才对其中的图片文件执行延迟删除
     pub stash: Option<Vec<ClipboardItem>>,
+    /// 只读降级模式：data.json 存在但瞬态不可读（杀毒/备份工具占用等）时置位。
+    /// 此模式下 save() 一律拒绝——内存里是默认数据，任何落盘都会用默认数据
+    /// 覆盖原完好文件，等于销毁用户数据（评审 2026-09-10 C3）
+    pub read_only: bool,
 }
 
 pub type SharedStore = Mutex<Store>;
 
 /// 从 data.json 载入数据并跑迁移；解析损坏时隔离坏文件并以空数据启动；
-/// 文件存在但读取失败（瞬态原因）不隔离、原文件保持原样。
-/// 载入后经凭据后端恢复哨兵字段/迁移旧版明文凭据
+/// 文件存在但读取失败（瞬态原因）不隔离、原文件保持原样，并置 read_only 旗标
+/// （短暂重试后仍失败则进入只读降级）；载入后经凭据后端恢复哨兵字段/迁移旧版明文凭据。
+/// 返回 (数据, 恢复提示, 是否瞬态读失败)
 fn load_or_recover_with(
     path: &Path,
     creds: &dyn CredentialBackend,
     memo: &mut CredMemo,
-) -> (AppData, Option<String>) {
+) -> (AppData, Option<String>, bool) {
     let mut recovered_notice = None;
+    let mut read_failed = false;
     let mut data = if path.exists() {
-        match std::fs::read_to_string(path) {
-            Err(e) => {
-                // 「读不出来」≠「内容坏了」：瞬态读取失败不能把完好的
-                // data.json 改名隔离，那等于把好数据当坏数据扔出默认路径
-                eprintln!("[prompt-tool] data.json 读取失败（文件未被改动）: {e}");
-                recovered_notice = Some(format!(
-                    "数据文件暂时无法读取（{e}），文件未被改动。本次以空数据启动，重启通常可恢复原数据"
-                ));
-                AppData::default()
+        // 瞬态占用往往几百毫秒内自行解除：短暂重试再宣布失败
+        let mut raw = None;
+        for attempt in 0..3 {
+            match std::fs::read_to_string(path) {
+                Ok(text) => {
+                    raw = Some(text);
+                    break;
+                }
+                Err(e) if attempt < 2 => {
+                    eprintln!("[prompt-tool] data.json 读取失败（第 {} 次重试前）: {e}", attempt + 1);
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(e) => {
+                    // 「读不出来」≠「内容坏了」：瞬态读取失败绝不能把完好的
+                    // data.json 改名隔离或用默认数据覆盖——那等于把好数据当坏数据扔掉。
+                    // 置只读降级：原文件保持原样，本次运行不落盘（评审 2026-09-10 C3）
+                    eprintln!("[prompt-tool] data.json 读取失败（文件未被改动，进入只读模式）: {e}");
+                    recovered_notice = Some(format!(
+                        "数据文件暂时无法读取（{e}），原文件未被改动。本次以只读模式运行，改动将无法保存；请关闭可能占用该文件的程序（如杀毒/备份工具）后重启"
+                    ));
+                    read_failed = true;
+                }
             }
-            Ok(raw) => match serde_json::from_str::<AppData>(&raw) {
+        }
+        match raw {
+            Some(text) => match serde_json::from_str::<AppData>(&text) {
                 Ok(d) => d,
                 Err(e) => {
                     // 内容确实损坏才隔离：改名保留现场，空数据继续运行
@@ -79,13 +100,18 @@ fn load_or_recover_with(
                     AppData::default()
                 }
             },
+            None => AppData::default(),
         }
     } else {
         AppData::default()
     };
     crate::models::migrate(&mut data);
-    crate::creds::restore(&mut data, creds, memo);
-    (data, recovered_notice)
+    // 只读模式下不碰凭据库：内存数据是默认值，任何恢复/迁移写入都可能
+    // 在后续被拒绝的落盘路径里产生半套状态；保持 keyring 原样最安全
+    if !read_failed {
+        crate::creds::restore(&mut data, creds, memo);
+    }
+    (data, recovered_notice, read_failed)
 }
 
 /// 对 Mutex 中毒场景的容错取锁
@@ -116,7 +142,7 @@ impl Store {
 
         let creds: Arc<dyn CredentialBackend> = Arc::new(KeyringBackend);
         let mut cred_memo = CredMemo::default();
-        let (data, recovered_notice) =
+        let (data, recovered_notice, read_only) =
             load_or_recover_with(&path, creds.as_ref(), &mut cred_memo);
 
         Ok(Self {
@@ -131,6 +157,7 @@ impl Store {
             recovered_notice,
             paste_generation: 0,
             stash: None,
+            read_only,
         })
     }
 
@@ -138,7 +165,26 @@ impl Store {
         !self.path.exists() && !self.data.seeded
     }
 
+    /// 启动收尾：种子示例数据 + 首次落盘。只读降级模式（data.json 瞬态不可读）
+    /// 必须整体跳过——此时内存是默认数据，seed+save 会用默认数据覆盖原完好
+    /// 文件（评审 2026-09-10 C3）；图片 GC 同理由调用方按 read_only 跳过
+    pub fn startup_seed_and_persist(&mut self) -> Result<(), String> {
+        if self.read_only {
+            return Ok(());
+        }
+        self.data.seed_if_empty();
+        self.save()
+    }
+
     pub fn save(&self) -> Result<(), String> {
+        // 只读降级（data.json 瞬态不可读）：内存里是默认数据，任何落盘都会
+        // 覆盖原完好文件（评审 2026-09-10 C3），必须整体拒绝
+        if self.read_only {
+            return Err(
+                "数据文件暂时无法读取，本次启动为只读模式，改动未保存；请关闭占用该文件的程序后重启"
+                    .to_string(),
+            );
+        }
         // 凭据先写凭据库、data.json 只落哨兵：凭据写入失败必须放弃落盘，
         // 否则磁盘上是哨兵、凭据库里没有值，重启后凭据就丢了
         let mut payload = self.data.clone();
@@ -167,13 +213,14 @@ impl Store {
         Ok(())
     }
 
-    /// 修改数据并落盘（用户数据变更，标记待同步）
-    pub fn mutate<F>(&mut self, f: F) -> Result<(), String>
+    /// 修改数据并落盘（用户数据变更，标记待同步）。闭包可有返回值
+    /// （如 upsert_prompt 回传有效 id），与落盘同成功/失败语义
+    pub fn mutate<F, R>(&mut self, f: F) -> Result<R, String>
     where
-        F: FnOnce(&mut AppData),
+        F: FnOnce(&mut AppData) -> R,
     {
-        f(&mut self.data);
-        self.commit()
+        let ret = f(&mut self.data);
+        self.commit().map(|()| ret)
     }
 
     /// 对已就地修改过 data 的变更收尾：计数 +1、置待同步标记并落盘。
@@ -199,7 +246,7 @@ impl Store {
         let path = dir.join("data.json");
         let creds: Arc<dyn CredentialBackend> = Arc::new(crate::creds::MemoryBackend::default());
         let mut memo = CredMemo::default();
-        let (data, notice) = load_or_recover_with(&path, creds.as_ref(), &mut memo);
+        let (data, notice, read_only) = load_or_recover_with(&path, creds.as_ref(), &mut memo);
         Store {
             data,
             path,
@@ -212,6 +259,7 @@ impl Store {
             recovered_notice: notice,
             paste_generation: 0,
             stash: None,
+            read_only,
         }
     }
 
@@ -257,7 +305,7 @@ mod tests {
     fn store_in_with(creds: Arc<dyn CredentialBackend>, dir: &Path) -> Store {
         let path = dir.join("data.json");
         let mut memo = CredMemo::default();
-        let (data, notice) = load_or_recover_with(&path, creds.as_ref(), &mut memo);
+        let (data, notice, read_only) = load_or_recover_with(&path, creds.as_ref(), &mut memo);
         Store {
             data,
             path,
@@ -270,6 +318,7 @@ mod tests {
             recovered_notice: notice,
             paste_generation: 0,
             stash: None,
+            read_only,
         }
     }
 
@@ -327,6 +376,62 @@ mod tests {
         assert_eq!(quarantined.len(), 1, "只应隔离出一个文件");
         let saved = std::fs::read_to_string(dir.path().join(&quarantined[0])).unwrap();
         assert_eq!(saved, bad, "隔离文件必须原样保留坏内容供抢救");
+    }
+
+    // ---------- 评审 2026-09-10 C3：启动瞬态读失败必须只读保全 ----------
+
+    #[test]
+    fn transient_read_failure_flags_read_only_and_leaves_file_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        // 用「同名目录」模拟 path.exists()==true 但 read_to_string 失败的瞬态场景
+        //（杀毒/备份工具短暂占用的等价物）
+        let path = dir.path().join("data.json");
+        std::fs::create_dir(&path).unwrap();
+        let creds: Arc<dyn CredentialBackend> = Arc::new(crate::creds::MemoryBackend::default());
+        let mut memo = CredMemo::default();
+        let (_data, notice, read_failed) = load_or_recover_with(&path, creds.as_ref(), &mut memo);
+        assert!(read_failed, "读取失败必须置 read_only 旗标");
+        assert!(notice.is_some(), "必须向用户说明进入降级模式");
+        assert!(path.is_dir(), "瞬态读失败不得改名/隔离/删除原文件");
+    }
+
+    #[test]
+    fn read_only_store_refuses_save_and_preserves_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = r#"{"version":1,"seeded":true,"prompts":[],"categories":[],"clipboard":[],"tombstones":[],"settings":{}}"#;
+        std::fs::write(dir.path().join("data.json"), original).unwrap();
+        let mut store = store_in(dir.path());
+        store.read_only = true;
+
+        let res = store.save();
+        assert!(res.is_err(), "只读模式必须拒绝任何落盘，防止默认数据覆盖原文件");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("data.json")).unwrap(),
+            original,
+            "原文件必须逐字节保留"
+        );
+    }
+
+    #[test]
+    fn startup_seed_and_persist_skips_seeding_in_read_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store_in(dir.path());
+        store.read_only = true;
+
+        store.startup_seed_and_persist().unwrap();
+        assert!(!store.data.seeded, "只读模式不得 seed 示例数据");
+        assert!(store.data.prompts.is_empty());
+        assert!(!dir.path().join("data.json").exists(), "只读模式不得首次落盘");
+    }
+
+    #[test]
+    fn startup_seed_and_persist_normal_path_still_seeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store_in(dir.path());
+        assert!(!store.read_only);
+        store.startup_seed_and_persist().unwrap();
+        assert!(store.data.seeded, "正常路径保持原有 seed 行为");
+        assert!(dir.path().join("data.json").exists(), "正常路径保持首次落盘");
     }
 
     // ---------- save / .bak ----------
@@ -440,7 +545,7 @@ mod tests {
         store.save().unwrap();
 
         // 重新载入：哨兵被后端真实值替换，内存态仍是明文（供前端/命令使用）
-        let (data, _) = crate::store::load_or_recover_with(
+        let (data, _, _) = crate::store::load_or_recover_with(
             &dir.path().join("data.json"),
             creds.as_ref(),
             &mut CredMemo::default(),
@@ -461,7 +566,7 @@ mod tests {
         .unwrap();
 
         let creds = Arc::new(crate::creds::MemoryBackend::default());
-        let (data, _) = crate::store::load_or_recover_with(
+        let (data, _, _) = crate::store::load_or_recover_with(
             &dir.path().join("data.json"),
             creds.as_ref(),
             &mut CredMemo::default(),

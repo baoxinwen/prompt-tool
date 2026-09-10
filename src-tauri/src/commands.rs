@@ -17,7 +17,9 @@ fn emit_data_changed(app: &AppHandle) {
 
 /// 保存/新建提示词的公共落库逻辑：空标题兜底「未命名提示词」、空分类兜底「未分类」、
 /// 更新时间刷新；新建生成 id 与 created_at，更新保留 created_at 与使用统计。
-fn upsert_prompt(data: &mut AppData, mut prompt: Prompt) {
+/// 返回该条目的有效 id（新建时为生成的 id，供前端绑定草稿，避免前端用
+/// 「createdAt 最新」启发式反查在并发建档时绑错条目——评审 2026-09-10 I5）
+fn upsert_prompt(data: &mut AppData, mut prompt: Prompt) -> String {
     prompt.updated_at = now_ms();
     if prompt.title.trim().is_empty() {
         prompt.title = "未命名提示词".into();
@@ -34,6 +36,7 @@ fn upsert_prompt(data: &mut AppData, mut prompt: Prompt) {
         let p = prompt.clone();
         data.ensure_category(&p.category);
         data.prompts.push(p);
+        prompt.id
     } else {
         match data.prompts.iter_mut().find(|x| x.id == id) {
             Some(existing) => {
@@ -52,17 +55,22 @@ fn upsert_prompt(data: &mut AppData, mut prompt: Prompt) {
                 data.prompts.push(p);
             }
         }
+        id
     }
 }
 
-/// 分类重命名校验：空名 / 与现有分类重名都拒绝
-fn validate_category_rename(data: &AppData, new_name: &str) -> Result<(), String> {
+/// 分类重命名校验：空名 / 与现有分类重名都拒绝；old_name 必须存在——
+/// 否则零修改却返回成功，前端误以为重命名完成（评审 2026-09-10 M6#6）
+fn validate_category_rename(data: &AppData, old_name: &str, new_name: &str) -> Result<(), String> {
     let new_name = new_name.trim();
     if new_name.is_empty() {
         return Err("分类名不能为空".into());
     }
     if data.categories.iter().any(|c| c == new_name) {
         return Err("该分类名已存在".into());
+    }
+    if !data.categories.iter().any(|c| c == old_name) {
+        return Err("原分类不存在".into());
     }
     Ok(())
 }
@@ -146,11 +154,11 @@ pub fn get_data(app: AppHandle, window: WebviewWindow) -> AppData {
 }
 
 #[tauri::command]
-pub async fn save_prompt(app: AppHandle, prompt: Prompt) -> Result<(), String> {
+pub async fn save_prompt(app: AppHandle, prompt: Prompt) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         hotkey::validate_prompt_hotkey(&app, &prompt.id, &prompt.hotkey)?;
         let mut store = lock(&app);
-        store.mutate(|d| upsert_prompt(d, prompt.clone()))?;
+        let saved_id = store.mutate(|d| upsert_prompt(d, prompt.clone()))?;
         drop(store);
         // 注册失败要回传给用户：数据已保存（上面 mutate 已落盘），但快捷键按下无反应，
         // 静默失败会让用户以为绑定成功而无法自助排查
@@ -165,7 +173,7 @@ pub async fn save_prompt(app: AppHandle, prompt: Prompt) -> Result<(), String> {
             ));
         }
         emit_data_changed(&app);
-        Ok(())
+        Ok(saved_id)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -226,10 +234,12 @@ pub async fn add_category(app: AppHandle, name: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn rename_category(app: AppHandle, old_name: String, new_name: String) -> Result<(), String> {
+    let old_name = old_name.trim().to_string();
     let new_name = new_name.trim().to_string();
     tauri::async_runtime::spawn_blocking(move || {
         let mut store = lock(&app);
-        validate_category_rename(&store.data, &new_name)?;
+        // old_name 必须存在：不存在时零修改返回成功会让前端误以为重命名完成（M6#6）
+        validate_category_rename(&store.data, &old_name, &new_name)?;
         store.mutate(|d| apply_category_rename(d, &old_name, &new_name))?;
         drop(store);
         emit_data_changed(&app);
@@ -264,9 +274,11 @@ pub fn copy_text(app: AppHandle, text: String) -> Result<(), String> {
         store.paste_generation += 1;
         store.paste_generation
     };
-    // 写入失败必须解除抑制，否则剪贴板历史从此静默失效直到重启
+    // 写入失败必须解除抑制，否则剪贴板历史从此静默失效直到重启。
+    // 按代际判断（M6#7）：失败瞬间可能已有新会话推进代际，直接清标志
+    // 会提前解除新会话的抑制，使其内容被误记进剪贴板历史
     if let Err(e) = paste::set_clipboard_text(&text) {
-        lock(&app).suppress_clipboard = false;
+        lock(&app).release_suppress_if_current(generation);
         return Err(e);
     }
     let h = app.clone();
@@ -407,7 +419,11 @@ pub async fn paste_image(app: AppHandle, window: WebviewWindow, id: String) -> R
         let handle = app.clone();
         std::thread::spawn(move || {
             let target = lock(&handle).paste_target.take();
-            paste::send_paste(target, append_enter);
+            if let Err(e) = paste::send_paste(target, append_enter) {
+                // 注入失败只能异步上报（invoke_paste 此时已返回），交前端 toast
+                eprintln!("[prompt-tool] {e}");
+                let _ = tauri::Emitter::emit(&handle, "paste-failed", e);
+            }
             // 与其他写入路径共用抑制窗口；代际未变才解除，避免把程序自己
             // 写入/粘贴的内容误记进剪贴板历史（评审 I2）
             std::thread::sleep(crate::clipboard::SUPPRESS_WINDOW);
@@ -691,9 +707,14 @@ pub async fn export_data(app: AppHandle, kind: String, include_clipboard: bool) 
 
         let content = match kind.as_str() {
             "markdown" => transfer::export_markdown(&data),
-            _ => transfer::export_json(&data, include_clipboard),
+            _ => transfer::export_json(&data, include_clipboard)?,
         };
-        std::fs::write(&path, content).map_err(|e| format!("写入文件失败: {e}"))?;
+        // 写入失败时清理半成品（评审 2026-09-10 M8#10）：
+        // 残留的部分字节文件会被用户误当完整备份留存
+        if let Err(e) = std::fs::write(&path, &content) {
+            let _ = std::fs::remove_file(&path);
+            return Err(format!("写入文件失败: {e}"));
+        }
         Ok(path.to_string_lossy().to_string())
     })
     .await
@@ -739,12 +760,36 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> Result<ImportSu
     .map_err(|e| e.to_string())?
 }
 
+/// 单文件导入上限：合法备份远小于此值；误拖安装包/视频等大文件时在读取前
+/// 快速失败，避免全量读入数倍内存导致长时间无响应甚至 OOM（评审 2026-09-10 I23）
+const MAX_IMPORT_FILE_BYTES: u64 = 50 * 1024 * 1024;
+
+fn validate_import_size(len: u64) -> Result<(), String> {
+    if len > MAX_IMPORT_FILE_BYTES {
+        return Err(format!(
+            "文件超过 {}MB 导入上限",
+            MAX_IMPORT_FILE_BYTES / 1024 / 1024
+        ));
+    }
+    Ok(())
+}
+
 fn import_from_files(handle: &AppHandle, files: &[std::path::PathBuf]) -> Result<ImportSummary, String> {
     let mut total_added = 0usize;
     let mut total_skipped = 0usize;
     let mut errors: Vec<String> = Vec::new();
+    let mut dirty = false;
 
     for path in files {
+        // 大小上限在读取前校验（fail fast，评审 2026-09-10 I23）
+        if let Err(e) = std::fs::metadata(path)
+            .map(|m| m.len())
+            .map_err(|e| format!("{}: {e}", path.display()))
+            .and_then(validate_import_size)
+        {
+            errors.push(e);
+            continue;
+        }
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) => {
@@ -766,13 +811,17 @@ fn import_from_files(handle: &AppHandle, files: &[std::path::PathBuf]) -> Result
                 total_skipped += s;
                 // 导入不走 save_prompt 的快捷键校验，这里统一清理冲突
                 hotkey::sanitize_prompt_hotkeys(&mut store.data);
-                // 走 commit 收尾（计数/待同步标记/落盘）：落盘失败要反馈给用户，
-                // 不能让"导入成功"的数据只停留在内存里重启即丢
-                if let Err(e) = store.commit() {
-                    errors.push(format!("{}: 保存失败: {e}", path.display()));
-                }
+                // 循环外统一 commit：N 个文件不再放大成 N 次全量落盘（评审 2026-09-10 R6#11）
+                dirty = true;
             }
             Err(e) => errors.push(format!("{}: {e}", path.display())),
+        }
+    }
+    if dirty {
+        let mut store = lock(handle);
+        // 落盘失败要反馈给用户，不能让"导入成功"的数据只停留在内存里重启即丢
+        if let Err(e) = store.commit() {
+            errors.push(format!("保存失败: {e}"));
         }
     }
 
@@ -886,6 +935,29 @@ mod tests {
 
     // ---------- upsert_prompt ----------
 
+    // 评审 2026-09-10 I23：导入文件大小上限的边界锁定
+    #[test]
+    fn validate_import_size_rejects_over_limit() {
+        assert!(validate_import_size(0).is_ok());
+        assert!(validate_import_size(1024).is_ok());
+        assert!(validate_import_size(50 * 1024 * 1024).is_ok(), "恰好上限应放行");
+        let err = validate_import_size(50 * 1024 * 1024 + 1).unwrap_err();
+        assert!(err.contains("50MB"), "错误信息应包含上限值: {err}");
+    }
+
+    // 评审 2026-09-10 I5：save_prompt 必须回传建档 id，前端据此绑定草稿
+    #[test]
+    fn upsert_prompt_returns_effective_id() {
+        let mut d = AppData::default();
+        let created = upsert_prompt(&mut d, prompt("", "新建", ""));
+        assert!(!created.is_empty(), "新建必须返回生成的 id");
+
+        let updated = upsert_prompt(&mut d, prompt(&created, "改名", ""));
+        assert_eq!(updated, created, "更新必须原样返回已有 id");
+        assert_eq!(d.prompts.len(), 1, "更新不得另建条目");
+        assert_eq!(d.prompts[0].title, "改名");
+    }
+
     #[test]
     fn upsert_new_assigns_id_and_defaults() {
         let mut d = AppData::default();
@@ -945,14 +1017,18 @@ mod tests {
         d.categories.push("写作".into());
 
         assert_eq!(
-            validate_category_rename(&d, "   "),
+            validate_category_rename(&d, "开发", "   "),
             Err("分类名不能为空".into())
         );
         assert_eq!(
-            validate_category_rename(&d, "写作"),
+            validate_category_rename(&d, "开发", "写作"),
             Err("该分类名已存在".into())
         );
-        assert!(validate_category_rename(&d, "设计").is_ok());
+        assert!(validate_category_rename(&d, "开发", "设计").is_ok());
+        assert!(
+            validate_category_rename(&d, "不存在", "设计").is_err(),
+            "old_name 不存在必须报错，零修改假成功会误导前端（M6#6）"
+        );
     }
 
     #[test]

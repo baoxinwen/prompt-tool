@@ -96,27 +96,34 @@ pub fn run() {
             let mut store = store::Store::load(&handle)?;
             let first_run = store.is_first_run();
             let recovered = store.recovered_notice.clone();
-            store.data.seed_if_empty();
-            store.save()?;
+            // 只读降级（data.json 瞬态不可读）下整体跳过 seed+save，
+            // 防止默认数据覆盖原完好文件（评审 2026-09-10 C3）
+            store.startup_seed_and_persist()?;
             app.manage(SharedStore::new(store));
 
             // 图片目录对账：清掉剪贴板历史已无引用的孤儿 PNG
-            //（崩溃残留/数据损坏隔离/.bak 恢复产生，评审 rc-M4）
-            let referenced_images: std::collections::HashSet<String> = {
-                let store = store::lock(&handle);
-                store
-                    .data
-                    .clipboard
-                    .iter()
-                    .filter_map(|i| i.image.as_ref().map(|im| im.file.clone()))
-                    .collect()
-            };
-            let removed = images::gc_orphans_in(&images::dir(&handle), &referenced_images);
-            if removed > 0 {
-                eprintln!("[prompt-tool] 已清理 {removed} 个无引用的孤儿图片文件");
+            //（崩溃残留/数据损坏隔离/.bak 恢复产生，评审 rc-M4）。
+            // 只读降级必须跳过：此时内存剪贴板为空，空引用集合会把全部图片误判为孤儿
+            if !store::lock(&handle).read_only {
+                let referenced_images: std::collections::HashSet<String> = {
+                    let store = store::lock(&handle);
+                    store
+                        .data
+                        .clipboard
+                        .iter()
+                        .filter_map(|i| i.image.as_ref().map(|im| im.file.clone()))
+                        .collect()
+                };
+                let removed = images::gc_orphans_in(&images::dir(&handle), &referenced_images);
+                if removed > 0 {
+                    eprintln!("[prompt-tool] 已清理 {removed} 个无引用的孤儿图片文件");
+                }
             }
 
             if !e2e {
+                // Gist id sidecar 恢复：首次上传后 store.save 失败的 id 在这里找回，
+                // 避免下轮自动同步再建孤儿 Gist（评审 2026-09-10 I17）
+                sync::restore_gist_id_from_sidecar(&handle);
                 clipboard::spawn(handle.clone());
                 sync::spawn_auto_sync(handle.clone());
 

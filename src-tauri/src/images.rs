@@ -37,7 +37,9 @@ pub fn save_png(
     img.save(dir.join(&file)).map_err(|e| format!("保存图片失败: {e}"))?;
 
     let tw = 160u32;
-    let th = (((height as f64) * (tw as f64) / (width as f64)).round() as u32).max(1);
+    // 极端长宽比（如 1×10000）会把 th 推到百万级，resize 分配 GB 级缓冲
+    // 分配失败即 abort 整个进程（评审 2026-09-10 M8#7），上限托底
+    let th = ((((height as f64) * (tw as f64) / (width as f64)).round() as u32).max(1)).min(4096);
     let thumb = image::imageops::resize(&img, tw, th, image::imageops::FilterType::Triangle);
     thumb
         .save(dir.join(format!("{id}_t.png")))
@@ -67,6 +69,11 @@ pub fn png_base64(bytes: &[u8]) -> String {
 }
 
 pub fn delete_files(app: &tauri::AppHandle, id: &str) {
+    // 与 read_png 对齐的形状校验（评审 2026-09-10 M8#11，防御深度）：
+    // 当前调用点全部传库内 uuid，但 `..`/路径分隔符一旦进来就是任意删文件
+    if id.contains("..") || id.contains('/') || id.contains('\\') || id.contains(':') {
+        return;
+    }
     let d = dir(app);
     let _ = std::fs::remove_file(d.join(format!("{id}.png")));
     let _ = std::fs::remove_file(d.join(format!("{id}_t.png")));

@@ -72,9 +72,38 @@ fn err_status(message: &str) -> UpdateStatus {
     }
 }
 
+/// 下载/安装重入闸门（评审 2026-09-10 I7）：插件自身无并发保护，
+/// 前端状态机跨页面卸载可能失效（组件态销毁后误判空闲），这里兜底拒绝并发
+static INSTALL_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// RAII 闸门：持有期间 INSTALL_IN_FLIGHT 为 true，Drop（含 panic）自动释放
+pub struct InstallGuard;
+
+impl InstallGuard {
+    pub fn acquire() -> Option<Self> {
+        INSTALL_IN_FLIGHT
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for InstallGuard {
+    fn drop(&mut self) {
+        INSTALL_IN_FLIGHT.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// 下载并安装；成功时进程被 NSIS 安装器接管退出，随后的 restart() 可能
 /// 不再执行，前端 Promise 可能永不 resolve，属预期。
 pub async fn download_and_install<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    let _guard = InstallGuard::acquire()
+        .ok_or_else(|| "已有更新下载/安装正在进行，请稍候".to_string())?;
     let updater = app.updater_builder().build().map_err(|e| e.to_string())?;
     // 插件不缓存检查结果，这里重新 check 拿 Update 对象；latest.json 很小，开销可忽略
     let update = updater
@@ -136,5 +165,21 @@ mod tests {
     #[test]
     fn progress_percent_near_max_no_overflow() {
         assert_eq!(progress_percent(u64::MAX - 5, Some(u64::MAX)), Some(99));
+    }
+
+    // 评审 2026-09-10 I7：下载/安装进行中必须拒绝二次进入（RAII 释放 panic 安全）
+    #[test]
+    fn install_guard_is_exclusive_and_releases_on_drop() {
+        {
+            let _g = InstallGuard::acquire().expect("首次获取应成功");
+            assert!(
+                InstallGuard::acquire().is_none(),
+                "持有期间二次获取必须被拒绝"
+            );
+        }
+        assert!(
+            InstallGuard::acquire().is_some(),
+            "Drop 后必须自动释放（含 panic 路径）"
+        );
     }
 }

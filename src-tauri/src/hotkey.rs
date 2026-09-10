@@ -19,20 +19,26 @@ pub fn register_all(app: &AppHandle) -> Vec<String> {
         )
     };
 
-    if let Err(e) = gs.on_shortcut(normalize(&main_hotkey).as_str(), |app, _s, event| {
-        if event.state() == ShortcutState::Pressed {
-            toggle_quick_window(app);
+    // 空主键不注册：空 accelerator 每次启动必然注册失败，徒增报错噪音（M7#11）
+    if !main_hotkey.trim().is_empty() {
+        if let Err(e) = gs.on_shortcut(normalize(&main_hotkey).as_str(), |app, _s, event| {
+            if event.state() == ShortcutState::Pressed {
+                toggle_quick_window(app);
+            }
+        }) {
+            eprintln!("[prompt-tool] 注册主快捷键 {} 失败: {e}", normalize(&main_hotkey));
+            failed.push(normalize(&main_hotkey));
         }
-    }) {
-        eprintln!("[prompt-tool] 注册主快捷键 {} 失败: {e}", normalize(&main_hotkey));
-        failed.push(normalize(&main_hotkey));
     }
 
     if !capture_hotkey.trim().is_empty() {
         let accel = normalize(&capture_hotkey);
         if let Err(e) = gs.on_shortcut(accel.as_str(), |app, _s, event| {
             if event.state() == ShortcutState::Pressed {
-                crate::capture::start(app);
+                // 热键回调在主线程同步执行（评审 2026-09-10 I18）：capture::start
+                // 里等待修饰键释放（≤400ms）属重活，内联会卡住整个消息泵
+                let app = app.clone();
+                std::thread::spawn(move || crate::capture::start(&app));
             }
         }) {
             eprintln!("[prompt-tool] 注册捕获快捷键 {accel} 失败: {e}");
@@ -63,8 +69,17 @@ pub fn register_all(app: &AppHandle) -> Vec<String> {
     failed
 }
 
-/// 触发提示词：无变量直接后台粘贴；有变量则呼出面板并让前端弹出变量填写窗
+/// 触发提示词：无变量直接后台粘贴；有变量则呼出面板并让前端弹出变量填写窗。
+/// 热键回调在主线程同步执行（评审 2026-09-10 I18）：使用统计要落盘
+/// （fsync+.bak+rename，慢盘/杀软扫描时数十 ms），必须移到工作线程，
+/// 否则整个消息泵与后续热键事件在落盘期间全部停顿
 pub fn trigger_prompt(app: &AppHandle, id: &str) {
+    let app = app.clone();
+    let id = id.to_string();
+    std::thread::spawn(move || trigger_prompt_impl(&app, &id));
+}
+
+fn trigger_prompt_impl(app: &AppHandle, id: &str) {
     let prompt: Option<Prompt> = {
         let store = crate::store::lock(app);
         store.data.prompts.iter().find(|p| p.id == id).cloned()
@@ -114,10 +129,20 @@ fn has_vars(content: &str) -> bool {
     false
 }
 
+/// 快捷键是否含有效修饰键：裸字母/数字键注册成功后会全局拦截该键，
+/// 系统级打字被劫持（评审 2026-09-10 M7#10）。与前端 HotkeyInput 口径一致：
+/// Shift 单独不算（仅 Shift 不满足绑定要求）
+fn has_effective_modifier(normalized: &str) -> bool {
+    normalized
+        .split('+')
+        .any(|part| matches!(part, "alt" | "ctrl" | "super" | "win" | "meta"))
+}
+
 /// 导入 / 云同步合并后清理提示词快捷键：
 /// 与主键、捕获键或先注册的提示词冲突的键一律清空并 bump updated_at（让清理结果同步出去）。
 /// 导入路径没有 save_prompt 的 validate_prompt_hotkey 卡口，必须在此兜底，
-/// 否则分享的提示词包可静默抢占/挤掉全局快捷键。
+/// 否则分享的提示词包可静默抢占/挤掉全局快捷键；
+/// 无修饰键的裸键同样在此清空（导入数据绕过了前端 UI 的修饰键强制）
 pub fn sanitize_prompt_hotkeys(data: &mut crate::models::AppData) {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let main = normalize(&data.settings.hotkey);
@@ -133,7 +158,7 @@ pub fn sanitize_prompt_hotkeys(data: &mut crate::models::AppData) {
             continue;
         }
         let n = normalize(&p.hotkey);
-        if n.is_empty() || !seen.insert(n) {
+        if n.is_empty() || !has_effective_modifier(&n) || !seen.insert(n) {
             p.hotkey = String::new();
             p.updated_at = now_ms();
         }
@@ -305,6 +330,19 @@ mod tests {
     // ---------- sanitize_prompt_hotkeys ----------
 
     #[test]
+    // 评审 2026-09-10 M7#10：导入路径绕过 UI 的修饰键强制，裸键在此兜底清空
+    #[test]
+    fn sanitize_strips_bare_keys_without_modifier() {
+        let mut data = AppData::default();
+        data.prompts.push(prompt_with_hotkey("p1", "a", 5));
+        data.prompts.push(prompt_with_hotkey("p2", "shift+5", 5));
+        data.prompts.push(prompt_with_hotkey("p3", "ctrl+k", 5));
+        sanitize_prompt_hotkeys(&mut data);
+        assert_eq!(data.prompts[0].hotkey, "", "裸字母键必须清空");
+        assert_eq!(data.prompts[1].hotkey, "", "仅 Shift 修饰不算有效组合");
+        assert_eq!(data.prompts[2].hotkey, "ctrl+k", "带修饰键的合法组合保留");
+    }
+
     fn sanitize_clears_prompt_hotkey_conflicting_with_main_key() {
         let mut data = AppData::default(); // 默认主键 alt+q
         data.prompts.push(prompt_with_hotkey("p1", "Alt+Q", 5));

@@ -491,6 +491,39 @@ fn apply_clipboard_scope(payload: &mut SyncPayload, remote: Option<&SyncPayload>
     }
 }
 
+/// pull 的数据整体替换（纯逻辑，可测，评审 2026-09-10 I15 抽取）。
+/// 替换范围：categories/prompts/tombstones 全量；剪贴板按作用域——开启时取
+/// 云端条目，关闭时文本剪贴板是纯本地数据原样保留；图片条目始终保留本机的
+/// （云端载荷不含图片文件）。最后清掉与主键/捕获键冲突或重复的独立快捷键：
+/// pull 与 merge 必须同样有 sanitize 兜底，否则冲突键注册失败但数据里
+/// hotkey 保留，按键静默失效，之后 merge 还会把它清空并传播回云端
+fn apply_pull(local: &mut crate::models::AppData, remote: &SyncPayload, sync_clipboard: bool) {
+    local.categories = remote.categories.clone();
+    local.prompts = remote.prompts.clone();
+    let mut clip = if sync_clipboard {
+        // 与 merge 同口径：跳过云端残留的图片条目（评审 2026-09-10 M7#5）
+        remote
+            .clipboard
+            .iter()
+            .filter(|i| !i.is_image())
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        local
+            .clipboard
+            .iter()
+            .filter(|i| !i.is_image())
+            .cloned()
+            .collect()
+    };
+    clip.extend(local.clipboard.iter().filter(|i| i.is_image()).cloned());
+    clip.sort_by_key(|i| std::cmp::Reverse(i.copied_at));
+    clip.truncate(crate::models::MAX_CLIPBOARD_ITEMS);
+    local.clipboard = clip;
+    local.tombstones = remote.tombstones.clone();
+    crate::hotkey::sanitize_prompt_hotkeys(local);
+}
+
 /// 条目级合并：内容按 updated_at 取新者；使用统计（use_count/last_used_at）
 /// 单调收敛取 max——它们的变化不 bump updated_at，不能参与 LWW，否则
 /// 一端的使用计数永远传不到另一端，且会被另一端的内容编辑整体覆盖。
@@ -525,6 +558,12 @@ fn merge(local: &mut crate::models::AppData, remote: &SyncPayload) -> (u64, u64,
     }
 
     for ri in &remote.clipboard {
+        // 防御（评审 2026-09-10 M7#5）：上传侧已过滤图片条目，但云端可能残留
+        // 旧版本数据或被外部修改；并入引用本机不存在文件的图片条目会成为
+        // 永久裂图，且 GC 对账会视其为"有引用"而永不清理
+        if ri.is_image() {
+            continue;
+        }
         match local.clipboard.iter_mut().find(|i| i.id == ri.id) {
             None => {
                 local.clipboard.push(ri.clone());
@@ -613,10 +652,14 @@ fn run_sync_inner(app: &AppHandle, direction: &str) -> Result<SyncReport, String
     match direction {
         "push" => {
             // 关闭剪贴板同步时先取云端既有剪贴板填入载荷，避免空数组
-            // 借整体替换语义清空云端副本（评审 I11）；云端无数据则保持为空
+            // 借整体替换语义清空云端副本（评审 I11）；云端无数据则保持为空。
+            // 开启剪贴板同步时载荷原样上传，无需 fetch（评审 2026-09-10 M7#6）：
+            // 省一次网络往返，云端 GET 瞬时故障也不再阻断本可成功的上传
             let mut payload = payload;
-            let remote_for_scope = backend.fetch()?;
-            apply_clipboard_scope(&mut payload, remote_for_scope.as_ref(), sync_clipboard);
+            if !sync_clipboard {
+                let remote_for_scope = backend.fetch()?;
+                apply_clipboard_scope(&mut payload, remote_for_scope.as_ref(), sync_clipboard);
+            }
             let new_gist = backend.upload(&payload)?;
             persist_new_gist_id(app, new_gist)?;
             // 上传期间若有新变更，保持 dirty，让下个自动同步周期补传
@@ -635,27 +678,7 @@ fn run_sync_inner(app: &AppHandle, direction: &str) -> Result<SyncReport, String
             let remote = backend.fetch()?.ok_or("云端暂无数据")?;
             {
                 let mut store = lock(app);
-                store.data.categories = remote.categories.clone();
-                store.data.prompts = remote.prompts.clone();
-                // 云端载荷不含图片条目：整体替换会清掉本机图片历史。
-                // 替换范围只限同步作用域：开启剪贴板同步时取云端文本条目；
-                // 关闭时文本剪贴板是纯本地数据，不在"云端覆盖"范围内，原样保留
-                let mut clip = if sync_clipboard {
-                    remote.clipboard.iter().cloned().collect::<Vec<_>>()
-                } else {
-                    store
-                        .data
-                        .clipboard
-                        .iter()
-                        .filter(|i| !i.is_image())
-                        .cloned()
-                        .collect()
-                };
-                clip.extend(store.data.clipboard.iter().filter(|i| i.is_image()).cloned());
-                clip.sort_by_key(|i| std::cmp::Reverse(i.copied_at));
-                clip.truncate(crate::models::MAX_CLIPBOARD_ITEMS);
-                store.data.clipboard = clip;
-                store.data.tombstones = remote.tombstones.clone();
+                apply_pull(&mut store.data, &remote, sync_clipboard);
                 store.dirty_unsynced = false;
                 store.save()?;
             }
@@ -722,7 +745,51 @@ fn run_sync_inner(app: &AppHandle, direction: &str) -> Result<SyncReport, String
                 message: format!("同步完成：{detail}，并已上传云端"),
             })
         }
+        other => Err(format!("未知同步方向: {other}")),
     }
+}
+
+/// gist id 的本地 sidecar：store.save 失败（磁盘满等）时 Gist 已创建且含全量
+/// 数据副本，id 只在这里有副本；下次启动恢复，避免下轮自动同步再建一个
+/// 孤儿 Gist（评审 2026-09-10 I17）
+const SYNC_STATE_FILE: &str = "sync-state.json";
+
+fn write_gist_sidecar(dir: &std::path::Path, gist_id: &str) -> Result<(), String> {
+    let tmp = dir.join(format!("{SYNC_STATE_FILE}.tmp"));
+    let path = dir.join(SYNC_STATE_FILE);
+    let body = serde_json::json!({ "gist_id": gist_id }).to_string();
+    std::fs::write(&tmp, body).map_err(|e| format!("写入同步状态失败: {e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("提交同步状态失败: {e}"))
+}
+
+fn read_gist_sidecar(dir: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(SYNC_STATE_FILE)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    v.get("gist_id")
+        .and_then(|g| g.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
+/// 启动时从 sidecar 恢复 gist_id（设置里为空且 sidecar 有值才生效）
+pub fn restore_gist_id_from_sidecar(app: &AppHandle) {
+    let Some(id) = read_gist_sidecar(&{
+        let store = lock(app);
+        store.data_dir()
+    }) else {
+        return;
+    };
+    {
+        let mut store = lock(app);
+        if !store.data.settings.gist.gist_id.trim().is_empty() {
+            return; // 设置里已有 id：sidecar 是陈旧副本，不动
+        }
+        store.data.settings.gist.gist_id = id;
+        if store.save().is_err() {
+            return; // 落盘失败保持内存态即可，sidecar 仍在
+        }
+    }
+    let _ = app.emit("data-changed", ());
 }
 
 /// 首次上传时自动创建的 Gist id 写回配置
@@ -730,6 +797,11 @@ fn persist_new_gist_id(app: &AppHandle, new_gist: Option<String>) -> Result<(), 
     let Some(id) = new_gist else {
         return Ok(());
     };
+    // 先落 sidecar 再 save：save 失败（磁盘满等）时 id 至少有本地副本可恢复（I17）
+    write_gist_sidecar(&{
+        let store = lock(app);
+        store.data_dir()
+    }, &id)?;
     {
         let mut store = lock(app);
         store.data.settings.gist.gist_id = id;
@@ -864,6 +936,73 @@ mod tests {
         assert_eq!((added, updated, removed), (1, 0, 0));
         assert_eq!(local.prompts[0].content, "远端正文");
         assert!(local.categories.contains(&"新分类".to_string()));
+    }
+
+    // ---------- 评审 2026-09-10 I15：pull 必须有快捷键 sanitize 兜底 ----------
+
+    #[test]
+    fn apply_pull_sanitizes_conflicting_prompt_hotkeys() {
+        let mut local = AppData::default();
+        local.settings.hotkey = "alt+q".into();
+        let mut remote_prompt = prompt("r1", "远端正文", 100, 0, 0);
+        remote_prompt.hotkey = "alt+q".into(); // 与 B 端主键冲突
+        let remote = payload(vec![], vec![remote_prompt], vec![], vec![]);
+
+        apply_pull(&mut local, &remote, false);
+        assert_eq!(
+            local.prompts[0].hotkey, "",
+            "与主键冲突的快捷键必须在 pull 后清空，否则按键静默失效并被后续 merge 传播删除"
+        );
+    }
+
+    #[test]
+    fn apply_pull_clipboard_scope_and_image_retention() {
+        let mut local = AppData::default();
+        local.clipboard.push(text_clip("l1", "本地文本", 100));
+        let mut local_img = text_clip("li", "", 90);
+        local_img.kind = "image".into();
+        local_img.image = Some(crate::models::ImageRef {
+            file: "li.png".into(),
+            width: 4,
+            height: 4,
+        });
+        local.clipboard.push(local_img);
+
+        // 关闭剪贴板同步：文本保留本机的，云端文本不进来，本机图片必须保留
+        let remote = payload(
+            vec![],
+            vec![],
+            vec![text_clip("r1", "云端文本", 200)],
+            vec![],
+        );
+        apply_pull(&mut local, &remote, false);
+        let ids: Vec<&str> = local.clipboard.iter().map(|c| c.id.as_str()).collect();
+        assert!(ids.contains(&"l1"), "关闭作用域时本地文本保留");
+        assert!(!ids.contains(&"r1"), "关闭作用域时云端文本不并入");
+        assert!(ids.contains(&"li"), "图片条目始终保留本机");
+
+        // 开启剪贴板同步：取云端文本，本机图片仍保留
+        apply_pull(&mut local, &remote, true);
+        let ids: Vec<&str> = local.clipboard.iter().map(|c| c.id.as_str()).collect();
+        assert!(ids.contains(&"r1"), "开启作用域时取云端文本");
+        assert!(ids.contains(&"li"), "开启作用域时本机图片仍保留");
+    }
+
+    // ---------- 评审 2026-09-10 I17：gist id sidecar ----------
+
+    #[test]
+    fn gist_sidecar_roundtrip_and_corrupt_tolerance() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(read_gist_sidecar(dir.path()), None, "无 sidecar 返回 None");
+
+        write_gist_sidecar(dir.path(), "abc123").unwrap();
+        assert_eq!(read_gist_sidecar(dir.path()).as_deref(), Some("abc123"));
+
+        std::fs::write(dir.path().join(SYNC_STATE_FILE), "不是合法 JSON").unwrap();
+        assert_eq!(read_gist_sidecar(dir.path()), None, "坏内容按无 sidecar 处理");
+
+        std::fs::write(dir.path().join(SYNC_STATE_FILE), r#"{"gist_id":""}"#).unwrap();
+        assert_eq!(read_gist_sidecar(dir.path()), None, "空 id 视为无 sidecar");
     }
 
     #[test]

@@ -7,7 +7,7 @@ use crate::models::{new_id, now_ms, AppData, Prompt};
 /// 导出为 JSON（完整备份）。图片条目体积大且是临时性内容，不导出；
 /// 墓碑随备份走：恢复备份后仍能拦住云端同步把已删除条目复活。
 /// 含同步凭据原文的剪贴板条目强制排除（复制 token/密码会被剪贴板记录捕获）
-pub fn export_json(data: &AppData, include_clipboard: bool) -> String {
+pub fn export_json(data: &AppData, include_clipboard: bool) -> Result<String, String> {
     let secrets = [&data.settings.gist.token, &data.settings.webdav.password];
     let clipboard = if include_clipboard {
         data.clipboard
@@ -32,7 +32,9 @@ pub fn export_json(data: &AppData, include_clipboard: bool) -> String {
         "tombstones": data.tombstones,
         "clipboard": clipboard,
     });
-    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".into())
+    // 序列化失败必须传播（评审 2026-09-10 M8#6）：把 "{}" 当成功内容
+    // 写进用户选定的备份文件，等于产出一个空备份
+    serde_json::to_string_pretty(&payload).map_err(|e| format!("导出序列化失败: {e}"))
 }
 
 /// 内容里含连续反引号时用更长的围栏包裹，保证再导入能完整还原
@@ -117,21 +119,44 @@ pub fn import_json(data: &mut AppData, text: &str) -> Result<(usize, usize), Str
                 }
             }
         }
-        // 合并备份中的墓碑（按 id 去重取较新时间），恢复后云端已删条目不会复活
+        // 合并备份中的墓碑（按 id 去重取较新时间），恢复后云端已删条目不会复活。
+        // 先聚合再合并（评审 2026-09-10 I19）：入参来自外部文件、条数无上限，
+        // 循环内对现有墓碑线性查找会被海量墓碑放大成 O(n²)，导入线程卡死
         if let Some(Value::Array(ts)) = o.get("tombstones") {
+            // 入参按文件顺序聚合：同 id 取最大 at（聚合顺序保持文件顺序，
+            // 使下方超限截断保持与旧行为一致的确定性）
+            let mut incoming: Vec<(String, u64)> = Vec::new();
+            let mut incoming_pos: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
             for t in ts {
-                let id = t.get("id").and_then(|x| x.as_str());
-                let at = t.get("at").and_then(|x| x.as_u64());
-                if let (Some(id), Some(at)) = (id, at) {
+                if let (Some(id), Some(at)) = (
+                    t.get("id").and_then(|x| x.as_str()),
+                    t.get("at").and_then(|x| x.as_u64()),
+                ) {
                     if id.is_empty() {
                         continue;
                     }
-                    match data.tombstones.iter_mut().find(|x| x.id == id) {
-                        Some(x) => x.at = x.at.max(at),
-                        None => data.tombstones.push(crate::models::Tombstone {
-                            id: id.to_string(),
-                            at,
-                        }),
+                    match incoming_pos.get(id) {
+                        Some(&i) => incoming[i].1 = incoming[i].1.max(at),
+                        None => {
+                            incoming_pos.insert(id.to_string(), incoming.len());
+                            incoming.push((id.to_string(), at));
+                        }
+                    }
+                }
+            }
+            let mut existing_pos: std::collections::HashMap<String, usize> = data
+                .tombstones
+                .iter()
+                .enumerate()
+                .map(|(i, t)| (t.id.clone(), i))
+                .collect();
+            for (id, at) in incoming {
+                match existing_pos.get(&id) {
+                    Some(&i) => data.tombstones[i].at = data.tombstones[i].at.max(at),
+                    None => {
+                        existing_pos.insert(id.clone(), data.tombstones.len());
+                        data.tombstones.push(crate::models::Tombstone { id, at });
                     }
                 }
             }
@@ -269,9 +294,12 @@ pub fn import_markdown(data: &mut AppData, text: &str, default_category: &str) -
             } else {
                 *skipped += 1;
             }
-            lines.clear();
-            *in_code = false;
         }
+        // 收尾清空必须无条件执行（评审 2026-09-10 I22）：首个 H2 之前的
+        // 围栏/正文行会在 current=None 时积压在 lines 里，若只在有 current
+        // 时清空，垃圾行会并入第一条提示词的正文且不会被 strip_code_fence 剥离
+        lines.clear();
+        *in_code = false;
     };
 
     for raw_line in text.lines() {
@@ -356,7 +384,9 @@ pub fn import_markdown(data: &mut AppData, text: &str, default_category: &str) -
     (added, skipped)
 }
 
-/// 纯文本导入：一个文件一条，文件名为标题
+/// 纯文本导入：一个文件一条，文件名为标题。
+/// 与 import_json/import_markdown 一致按（分类,标题）去重（评审 2026-09-10 M8#8）：
+/// 同名文件导入两次不再产生完全相同的重复条目。返回是否收录
 pub fn import_text(data: &mut AppData, title: &str, content: &str) -> bool {
     if content.trim().is_empty() {
         return false;
@@ -375,6 +405,13 @@ pub fn import_text(data: &mut AppData, title: &str, content: &str) -> bool {
         created_at: now,
         updated_at: now,
     };
+    if data
+        .prompts
+        .iter()
+        .any(|p| p.category == prompt.category && p.title == prompt.title)
+    {
+        return false;
+    }
     data.ensure_category("未分类");
     data.prompts.push(prompt);
     true
@@ -461,7 +498,7 @@ mod tests {
         data.clipboard.push(image_clip("c4"));
         data.tombstones.push(Tombstone { id: "dead".into(), at: 9 });
 
-        let out = export_json(&data, true);
+        let out = export_json(&data, true).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["app"], "Prompt Tool");
         assert_eq!(v["prompts"].as_array().unwrap().len(), 1);
@@ -480,7 +517,7 @@ mod tests {
     fn export_json_can_exclude_clipboard_entirely() {
         let mut data = AppData::default();
         data.clipboard.push(text_clip("c1", "hello", 1));
-        let v: Value = serde_json::from_str(&export_json(&data, false)).unwrap();
+        let v: Value = serde_json::from_str(&export_json(&data, false).unwrap()).unwrap();
         assert!(v["clipboard"].as_array().unwrap().is_empty());
     }
 
@@ -655,6 +692,61 @@ mod tests {
 
         let err = import_json(&mut data, r#"{"prompts": 42}"#).unwrap_err();
         assert!(err.contains("未找到 prompts"), "prompts 非数组也应报错: {err}");
+    }
+
+    // ---------- 评审 2026-09-10 I19：海量墓碑不得 O(n²) 卡死导入 ----------
+
+    #[test]
+    fn import_json_tombstone_merge_keeps_max_at_and_dedupes() {
+        let mut data = AppData::default();
+        data.tombstones.push(Tombstone { id: "a".into(), at: 100 });
+        let json = r#"{"prompts":[],"tombstones":[{"id":"a","at":50},{"id":"a","at":200},{"id":"b","at":1},{"id":"a","at":150}]}"#;
+        import_json(&mut data, &json).unwrap();
+        let dupes = data.tombstones.iter().filter(|t| t.id == "a").count();
+        assert_eq!(dupes, 1, "重复 id 必须去重");
+        assert_eq!(
+            data.tombstones.iter().find(|t| t.id == "a").unwrap().at,
+            200,
+            "重复 id 取最大时间戳"
+        );
+    }
+
+    #[test]
+    fn import_json_large_tombstone_list_completes_in_linear_time() {
+        let mut data = AppData::default();
+        let mut json = String::from(r#"{"prompts":[],"tombstones":["#);
+        for i in 0..60_000u64 {
+            if i > 0 {
+                json.push(',');
+            }
+            json.push_str(&format!(r#"{{"id":"t{i}","at":{i}}}"#));
+        }
+        json.push_str("]}");
+
+        let start = std::time::Instant::now();
+        import_json(&mut data, &json).unwrap();
+        let elapsed = start.elapsed();
+        // 旧实现循环内线性查找：6 万条约 1.8e9 次字符串比较，debug 构建下
+        // 远超 5s；聚合合并后应在毫秒级完成
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "6 万条墓碑导入耗时 {elapsed:?}，疑似 O(n²) 回归"
+        );
+        assert!(data.tombstones.len() <= 5000, "超限必须截断到 5000");
+    }
+
+    // ---------- 评审 2026-09-10 I22：markdown 前导围栏状态机 ----------
+
+    #[test]
+    fn import_markdown_leading_fence_before_first_h2_is_discarded() {
+        let mut data = AppData::default();
+        let md = "```\n垃圾A\n```\n## 第一条\n\n正文一\n";
+        let (added, _) = import_markdown(&mut data, md, "未分类");
+        assert_eq!(added, 1);
+        assert_eq!(
+            data.prompts[0].content, "正文一",
+            "首个 H2 之前的围栏垃圾行不得并入第一条正文"
+        );
     }
 
     #[test]

@@ -76,6 +76,10 @@ fn write_memory(path: &Path, mem: &Memory) -> Result<(), String> {
     {
         let f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
         serde_json::to_writer_pretty(&f, mem).map_err(|e| e.to_string())?;
+        // rename 前 fsync（评审 2026-09-10 M8#15）：本文件无 .bak，且设计是
+        // 「读不出即拒绝保存」——断电截断后用户无法自愈，健壮性口径与
+        // store.rs 的 data.json 落盘对齐
+        f.sync_all().map_err(|e| format!("保存变量记忆失败: {e}"))?;
     }
     std::fs::rename(&tmp, path).map_err(|e| format!("保存变量记忆失败: {e}"))
 }
