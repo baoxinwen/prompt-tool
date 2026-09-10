@@ -15,7 +15,7 @@ import {
 } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import { managerKey } from '../lib/context';
-import { hasVars, extractVars, isAutoVar, applyVars, VAR_RE } from '../lib/vars';
+import { hasVars, extractVars, isAutoVar, applyVars, applyClipboardVar, clipboardVarRe, VAR_RE } from '../lib/vars';
 import { matchText, highlightSegs } from '../lib/search';
 import { previewSegments } from '../lib/preview';
 import { categoryColor } from '../lib/categoryColor';
@@ -57,8 +57,10 @@ const searchInput = ref<HTMLInputElement | null>(null);
 
 /** 自动保存状态机：idle 无指示 / dirty ● 未保存 / saved ✓ 已自动保存 */
 const saveState = ref<'idle' | 'dirty' | 'saved'>('idle');
-/** 变量卡当前值（不属提示词正文，不参与 dirty/自动保存） */
-const varValues = ref<Record<string, string>>({});
+/** 变量卡当前值（不属提示词正文，不参与 dirty/自动保存）。
+ *  必须用无原型对象：变量名用户可控（如 __proto__），普通 {} 的赋值会被
+ *  原型访问器吞掉导致输入静默丢失（评审 2026-09-10 C2，与 VarDialog 同口径） */
+const varValues = ref<Record<string, string>>(Object.create(null) as Record<string, string>);
 /** 填写变量并粘贴进行中（防重复点击） */
 const pasteBusy = ref(false);
 /** 复制按钮「已复制 ✓」短暂态 */
@@ -141,7 +143,7 @@ async function newPrompt() {
   snapshot.value = '';
   dirty.value = false;
   saveState.value = 'idle';
-  varValues.value = {};
+  varValues.value = Object.create(null) as Record<string, string>;
   clearTimeout(savedTipTimer);
 }
 
@@ -175,45 +177,52 @@ async function saveCore(opts: { silent?: boolean } = {}): Promise<boolean> {
     if (!opts.silent) ctx.toast('请填写标题', 'err');
     return false;
   }
-  // 本次落盘的状态基线（深拷贝）：静默路径用它和后端回写字段合成新快照
+  // 本次落盘的状态基线（深拷贝）+ 竞态基线：await 之后 ctx.refresh 可能触发
+  // watch(allPrompts) 重载草稿（loadDraft 会替换 draft.value 的引用），
+  // 只有同一份草稿对象才允许被续体回写（评审 2026-09-10 I4）
   const saving = JSON.parse(JSON.stringify(draft.value)) as Prompt;
+  const draftAtSave = draft.value;
+  const wasNew = !selectedId.value;
+  let savedId: string;
   try {
-    await api.savePrompt({ ...draft.value });
+    // 后端回传建档 id：不再用「createdAt 最新」启发式反查——并发建档
+    // （如全局快速捕获）会让启发式绑错条目，随后的自动保存会覆盖别人的
+    // 数据（评审 2026-09-10 I5）
+    savedId = await api.savePrompt({ ...draft.value });
     await ctx.refresh();
   } catch (e) {
     ctx.toast(String(e), 'err');
     return false;
   }
   if (opts.silent) {
-    const saved = selectedId.value
-      ? allPrompts.value.find((p) => p.id === selectedId.value)
-      : [...allPrompts.value].sort((a, b) => b.createdAt - a.createdAt)[0];
-    if (saved) {
-      if (!selectedId.value) {
-        // 新建提示词首次自动保存：后端已建档，把 id 写回草稿，下一轮改为更新
-        selectedId.value = saved.id;
-        saving.id = saved.id;
-        draft.value.id = saved.id;
+    if (draft.value === draftAtSave) {
+      const saved = allPrompts.value.find((p) => p.id === savedId);
+      if (saved) {
+        if (wasNew) {
+          // 新建提示词首次自动保存：把后端 id 写回草稿，下一轮改为更新
+          selectedId.value = saved.id;
+          saving.id = saved.id;
+          draft.value.id = saved.id;
+        }
+        saving.updatedAt = saved.updatedAt;
+        saving.useCount = saved.useCount;
+        saving.lastUsedAt = saved.lastUsedAt;
+        draft.value.updatedAt = saved.updatedAt;
+        draft.value.useCount = saved.useCount;
+        draft.value.lastUsedAt = saved.lastUsedAt;
       }
-      saving.updatedAt = saved.updatedAt;
-      saving.useCount = saved.useCount;
-      saving.lastUsedAt = saved.lastUsedAt;
-      draft.value.updatedAt = saved.updatedAt;
-      draft.value.useCount = saved.useCount;
-      draft.value.lastUsedAt = saved.lastUsedAt;
+      snapshot.value = JSON.stringify(saving);
+      dirty.value = JSON.stringify(draft.value) !== snapshot.value;
     }
-    snapshot.value = JSON.stringify(saving);
-    dirty.value = JSON.stringify(draft.value) !== snapshot.value;
+    // 草稿已被切换/重载：不碰新草稿、不动 snapshot，新草稿的状态由 loadDraft 决定
     return true;
   }
   ctx.toast('已保存');
-  if (selectedId.value) {
-    loadDraft(allPrompts.value.find((p) => p.id === selectedId.value) ?? draft.value);
-  } else {
-    const newest = [...allPrompts.value].sort((a, b) => b.createdAt - a.createdAt)[0];
-    if (newest) {
-      selectedId.value = newest.id;
-      loadDraft(newest);
+  if (draft.value === draftAtSave) {
+    const saved = allPrompts.value.find((p) => p.id === (savedId || selectedId.value));
+    if (saved) {
+      selectedId.value = saved.id;
+      loadDraft(saved);
     }
   }
   return true;
@@ -226,6 +235,10 @@ async function save() {
   if (await saveCore()) {
     saveState.value = 'idle';
     clearTimeout(savedTipTimer);
+  } else if (dirty.value) {
+    // 失败分支重排自动保存（评审 2026-09-10 M2#7）：否则自动保存链
+    // 在此处断掉，状态灯停在「未保存」直到用户再次键入
+    scheduleAutoSave();
   }
 }
 
@@ -332,7 +345,7 @@ async function copyContent() {
 async function loadVarValues() {
   const id = draft.value?.id ?? '';
   const seq = ++varLoadSeq;
-  const values: Record<string, string> = {};
+  const values: Record<string, string> = Object.create(null);
   for (const f of draftVars.value) values[f.name] = '';
   if (id) {
     try {
@@ -348,11 +361,9 @@ async function loadVarValues() {
 }
 
 /** {{clipboard}} 自动变量：粘贴前用当前剪贴板文本填充
- *  （QuickPanel doPaste 同款语义；读取失败 ≠ 剪贴板为空，文案须区分） */
-function clipboardVarRe(): RegExp {
-  return /\{\{\s*clipboard(?:\s*\|[^{}]*)?\s*\}\}/gi;
-}
-
+ *  （QuickPanel doPaste 同款语义；读取失败 ≠ 剪贴板为空，文案须区分。
+ *  替换必须走 applyClipboardVar 的函数替换：字符串替换会展开剪贴板里的
+ *  $&/$$ 序列改写内容——评审 2026-09-10 C1，本地副本已删，统一用 vars.ts） */
 async function fillClipboardVar(text: string): Promise<string> {
   if (!clipboardVarRe().test(text)) return text;
   let clip: string | null;
@@ -360,10 +371,10 @@ async function fillClipboardVar(text: string): Promise<string> {
     clip = await api.getClipboardText();
   } catch (e) {
     ctx.toast(`读取剪贴板失败（${e}），{{clipboard}} 已留空`, 'err');
-    return text.replace(clipboardVarRe(), '');
+    return applyClipboardVar(text, null);
   }
   if (!clip) ctx.toast('剪贴板为空，{{clipboard}} 已留空', 'err');
-  return text.replace(clipboardVarRe(), clip ?? '');
+  return applyClipboardVar(text, clip);
 }
 
 /** 主操作：变量卡当前值替换占位符 → {{clipboard}} 自动填充 → 粘贴到原活动窗口 */
@@ -378,7 +389,7 @@ async function fillAndPaste() {
     await api.invokePaste(text, promptId);
     // 变量值记忆与 VarDialog 同口径回存（失败不阻断粘贴，仅留日志）
     if (promptId && fields.length) {
-      const mem: Record<string, string> = {};
+      const mem: Record<string, string> = Object.create(null);
       for (const f of fields) mem[f.name] = varValues.value[f.name] ?? '';
       api.saveVarMemory(promptId, mem).catch((e) => {
         console.error('[prompt-tool] 变量记忆保存失败:', e);
@@ -481,6 +492,14 @@ function onAddCategoryKeydown(e: KeyboardEvent) {
   if (isComposingEvent(e)) return;
   if (e.key === 'Enter') addCategory();
   else if (e.key === 'Escape') addingCat.value = false;
+}
+
+// 新建分类输入框出现即聚焦：与重命名流程（nextTick focus）同口径，
+// 否则要点两次才能输入（评审 2026-09-10 M2#5）
+const addCatInput = ref<HTMLInputElement | null>(null);
+function toggleAddingCat() {
+  addingCat.value = !addingCat.value;
+  if (addingCat.value) nextTick(() => addCatInput.value?.focus());
 }
 
 async function deleteCategory(name: string) {
@@ -603,11 +622,12 @@ function fmtTime(ts: number) {
               </span>
             </button>
           </template>
-          <button class="chip chip-add" title="新建分类" @click="addingCat = !addingCat">
+          <button class="chip chip-add" title="新建分类" @click="toggleAddingCat">
             <Plus :size="12" />
           </button>
           <input
             v-if="addingCat"
+            ref="addCatInput"
             v-model="newCatName"
             class="chip-input"
             placeholder="分类名，回车确认"
@@ -721,7 +741,7 @@ function fmtTime(ts: number) {
                 <select v-model="draft.category" class="d-input" @change="markDirty">
                   <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
                   <option v-if="!categories.includes(draft.category)" :value="draft.category">
-                    {{ draft.category }}
+                    {{ draft.category || '未分类' }}
                   </option>
                 </select>
                 <input

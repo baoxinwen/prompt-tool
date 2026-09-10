@@ -526,4 +526,87 @@ describe('PromptsPane：提示词管理', () => {
       vi.useRealTimers();
     }
   });
+
+  // 评审 2026-09-10 C2：变量名为 __proto__ 时，普通 {} 的赋值会被原型访问器吞掉，
+  // 输入值静默丢失、替换为空串。VarDialog 已用 Object.create(null) 修复同源问题。
+  it('变量卡：__proto__ 变量填写值不丢失且参与粘贴替换', async () => {
+    const p = makePrompt({ id: 'pv2', title: '原型变量', content: '值={{__proto__}}' });
+    const { wrapper } = await mountPane([p]);
+    await wrapper.findAll('.pitem')[0].trigger('click');
+    await flushPromises();
+
+    const input = wrapper.find('.var-field input');
+    expect(input.exists()).toBe(true);
+    await input.setValue('注入值');
+    await wrapper.find('.fill-paste-btn').trigger('click');
+    await flushPromises();
+
+    expect(mockedApi.invokePaste).toHaveBeenCalledWith('值=注入值', 'pv2');
+    wrapper.unmount();
+  });
+
+  // 评审 2026-09-10 C1：{{clipboard}} 填充必须用函数替换——字符串替换会展开
+  // $&/$$/$`/$' 序列，剪贴板里的 shell/awk 片段被静默改写（vars.ts 注释点名的 C2 陷阱）
+  it('{{clipboard}} 填充不展开 $ 替换序列，粘贴原文', async () => {
+    mockedApi.getClipboardText.mockImplementation(async () => 'awk "{print $&}"');
+    const p = makePrompt({ id: 'pc2', title: '剪贴板变量', content: 'X{{clipboard}}' });
+    const { wrapper } = await mountPane([p]);
+    await wrapper.findAll('.pitem')[0].trigger('click');
+    await flushPromises();
+
+    await wrapper.find('.fill-paste-btn').trigger('click');
+    await flushPromises();
+
+    expect(mockedApi.invokePaste).toHaveBeenCalledWith('Xawk "{print $&}"', 'pc2');
+    wrapper.unmount();
+  });
+
+  // 评审 2026-09-10 I5：save_prompt 回传建档 id，草稿绑定不得用「createdAt 最新」
+  // 启发式——并发建档（全局捕获）会让启发式绑错条目，下一轮自动保存覆盖他人数据
+  it('自动保存竞态：新建保存期间并发他条建档，草稿绑定后端返回的 id', async () => {
+    vi.useFakeTimers();
+    try {
+      const { wrapper, ctx } = await mountPane([]);
+      const newBtn = wrapper
+        .findAll('button')
+        .find((b) => b.text().includes('新建提示词'))!;
+      await newBtn.trigger('click');
+      await flushPromises();
+      await wrapper.find('input.d-title').setValue('我的新提示词');
+
+      let calls = 0;
+      mockedApi.savePrompt.mockImplementation(async (p) => {
+        calls += 1;
+        if (calls === 1) {
+          // 本次保存建档（refresh 会带回），同时另一路径写入 createdAt 更新的提示词
+          ctx.data.value!.prompts.push(
+            makePrompt({ id: 'new-1', title: String(p.title), createdAt: 5_000 }),
+          );
+          ctx.data.value!.prompts.push(
+            makePrompt({ id: 'capture-x', title: '捕获', createdAt: 9_000 }),
+          );
+        }
+        return 'new-1';
+      });
+
+      await vi.advanceTimersByTimeAsync(900);
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(1);
+      await flushPromises();
+
+      expect(
+        (wrapper.vm as unknown as { draft?: { id: string } }).draft?.id,
+      ).toBe('new-1');
+
+      // 下一轮自动保存必须按 new-1 走更新路径，不得覆盖 capture-x
+      await wrapper.find('input.d-title').setValue('我的新提示词2');
+      await vi.advanceTimersByTimeAsync(900);
+      await flushPromises();
+      const lastCall = mockedApi.savePrompt.mock.calls.at(-1)![0];
+      expect(lastCall.id).toBe('new-1');
+      wrapper.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

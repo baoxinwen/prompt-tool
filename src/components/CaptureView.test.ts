@@ -79,7 +79,7 @@ describe('CaptureView：快速捕获', () => {
 
   it('C1：保存中禁用并显示保存中…，成功后「✓ 已保存」停留约 0.6s 再关窗', async () => {
     let resolveSave: () => void = () => {};
-    mockedApi.savePrompt.mockImplementation(() => new Promise<void>((r) => (resolveSave = r)));
+    mockedApi.savePrompt.mockImplementation(() => new Promise<string>((r) => (resolveSave = () => r("captured-1"))));
     const w = mountView();
     await flushPromises();
     await w.find('.cv-content').setValue('正文');

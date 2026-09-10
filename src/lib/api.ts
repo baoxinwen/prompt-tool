@@ -13,7 +13,8 @@ import type {
 export const api = {
   getData: () => invoke<AppData>('get_data'),
   getRecoveryNotice: () => invoke<string | null>('get_recovery_notice'),
-  savePrompt: (prompt: Prompt) => invoke<void>('save_prompt', { prompt }),
+  /** 保存/新建提示词，返回后端建档的有效 id（新建时为生成的 id，供草稿绑定） */
+  savePrompt: (prompt: Prompt) => invoke<string>('save_prompt', { prompt }),
   deletePrompt: (id: string) => invoke<void>('delete_prompt', { id }),
   recordUse: (id: string) => invoke<void>('record_prompt_use', { id }),
 
