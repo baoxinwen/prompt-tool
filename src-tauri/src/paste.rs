@@ -2,6 +2,11 @@ use std::time::Duration;
 
 /// 模拟粘贴/复制/回车按键：SendInput(Ctrl+V)。
 /// 本项目仅支持 Windows，按键注入直接使用 Win32 API（不保留跨平台桩）
+/// 仅测试使用：置位后注入函数直接报告失败（模拟目标窗口以管理员运行
+/// 触发 UIPI 拒绝注入的场景），不会真正向系统发送按键
+#[allow(dead_code)]
+pub static FAIL_INJECTION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 mod keys {
     /// 返回是否全部注入成功：SendInput 返回实际注入的事件数，被系统拒绝
     /// （目标以管理员运行触发 UIPI、安全软件拦截）时少于请求数。静默吞掉
@@ -32,6 +37,10 @@ mod keys {
             key(vk_key, true),
             key(vk_modifier, true),
         ];
+        // 测试注入失败路径（评审 2026-09-10 I21）：置位即报告失败，不真实注入
+        if cfg!(test) && super::FAIL_INJECTION.load(std::sync::atomic::Ordering::SeqCst) {
+            return false;
+        }
         let sent = unsafe {
             SendInput(
                 inputs.len() as u32,
@@ -220,7 +229,7 @@ pub fn send_paste(target: Option<isize>, append_enter: bool) -> Result<(), Strin
 
 /// 后台粘贴核心：写入剪贴板（含恢复准备）→ 唤回目标窗口 → 模拟粘贴 → 按设置恢复原剪贴板。
 /// 调用方负责在需要时先行隐藏窗口 / 记录 paste_target。
-pub fn paste_text(app: &tauri::AppHandle, text: &str) -> Result<(), String> {
+pub fn paste_text<R: tauri::Runtime>(app: &tauri::AppHandle<R>, text: &str) -> Result<(), String> {
     let (restore_clipboard, append_enter, generation) = {
         let mut store = crate::store::lock(app);
         store.suppress_clipboard = true;
@@ -275,6 +284,27 @@ pub fn paste_text(app: &tauri::AppHandle, text: &str) -> Result<(), String> {
 /// 用户看到），成功后才隐藏面板让焦点回到上一个窗口，然后后台粘贴。
 /// 旧实现「先隐藏再写」，写失败时 toast 渲染在已隐藏的窗口上，
 /// 操作静默整体丢失，且与图片粘贴路径（成功才 hide）不一致（评审 I1）
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    // 评审 2026-09-10 I21：SendInput 被系统拒绝时必须显式报错并向用户给出
+    // 可操作提示，而不是静默失败（面板已隐藏、剪贴板已被覆盖，操作整体丢失）
+    #[test]
+    fn send_paste_reports_injection_failure_instead_of_silence() {
+        FAIL_INJECTION.store(true, Ordering::SeqCst);
+        let result = send_paste(None, false);
+        FAIL_INJECTION.store(false, Ordering::SeqCst);
+
+        let err = result.expect_err("注入被拒绝时必须返回错误");
+        assert!(
+            err.contains("管理员"),
+            "错误信息须给出用户可操作提示: {err}"
+        );
+    }
+}
+
 pub fn paste_to_previous_window(
     window: &tauri::WebviewWindow,
     app: &tauri::AppHandle,

@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use crate::models::{now_ms, Prompt};
@@ -6,7 +6,7 @@ use crate::models::{now_ms, Prompt};
 /// 统一注册全部全局快捷键：面板主键 + 快速捕获键 + 各提示词的独立快捷键。
 /// 任一注册失败只记录日志（其余键继续生效），失败的加速键（已归一化）
 /// 以返回值反馈，供 save_prompt/save_settings 判断刚保存的键是否生效。
-pub fn register_all(app: &AppHandle) -> Vec<String> {
+pub fn register_all<R: Runtime>(app: &AppHandle<R>) -> Vec<String> {
     let mut failed: Vec<String> = Vec::new();
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
@@ -73,13 +73,22 @@ pub fn register_all(app: &AppHandle) -> Vec<String> {
 /// 热键回调在主线程同步执行（评审 2026-09-10 I18）：使用统计要落盘
 /// （fsync+.bak+rename，慢盘/杀软扫描时数十 ms），必须移到工作线程，
 /// 否则整个消息泵与后续热键事件在落盘期间全部停顿
-pub fn trigger_prompt(app: &AppHandle, id: &str) {
+pub fn trigger_prompt<R: Runtime>(app: &AppHandle<R>, id: &str) {
     let app = app.clone();
     let id = id.to_string();
-    std::thread::spawn(move || trigger_prompt_impl(&app, &id));
+    spawn_hotkey_work(move || trigger_prompt_impl(&app, &id));
 }
 
-fn trigger_prompt_impl(app: &AppHandle, id: &str) {
+/// 热键回调的收口执行器（评审 2026-09-10 I18）：回调线程即主线程，
+/// 任何回调工作必须经这里移到后台线程，落盘等重活不得阻塞消息泵
+fn spawn_hotkey_work<F>(f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    std::thread::spawn(f);
+}
+
+fn trigger_prompt_impl<R: Runtime>(app: &AppHandle<R>, id: &str) {
     let prompt: Option<Prompt> = {
         let store = crate::store::lock(app);
         store.data.prompts.iter().find(|p| p.id == id).cloned()
@@ -172,7 +181,7 @@ fn one_third_top(work_top: i32, work_height: i32, panel_height: i32) -> i32 {
 }
 
 /// 在鼠标当前所在显示器的工作区（排除任务栏）上 1/3 处显示快捷面板并聚焦
-pub fn show_quick_window(app: &AppHandle) {
+pub fn show_quick_window<R: Runtime>(app: &AppHandle<R>) {
     let Some(win) = app.get_webview_window("main") else {
         eprintln!("[prompt-tool] show_quick_window: main 窗口不存在");
         return;
@@ -219,7 +228,7 @@ pub fn show_quick_window(app: &AppHandle) {
     let _ = win.eval("window.dispatchEvent(new CustomEvent('pm-panel-shown'));");
 }
 
-pub fn toggle_quick_window(app: &AppHandle) {
+pub fn toggle_quick_window<R: Runtime>(app: &AppHandle<R>) {
     let Some(win) = app.get_webview_window("main") else {
         return;
     };
@@ -232,7 +241,7 @@ pub fn toggle_quick_window(app: &AppHandle) {
     }
 }
 
-pub fn open_manager_window(app: &AppHandle) {
+pub fn open_manager_window<R: Runtime>(app: &AppHandle<R>) {
     let Some(win) = app.get_webview_window("manager") else {
         return;
     };
@@ -242,7 +251,7 @@ pub fn open_manager_window(app: &AppHandle) {
 }
 
 /// 校验提示词快捷键：与面板主键 / 捕获键 / 其他提示词不得重复
-pub fn validate_prompt_hotkey(app: &AppHandle, prompt_id: &str, hotkey: &str) -> Result<(), String> {
+pub fn validate_prompt_hotkey<R: Runtime>(app: &AppHandle<R>, prompt_id: &str, hotkey: &str) -> Result<(), String> {
     let hk = hotkey.trim();
     if hk.is_empty() {
         return Ok(());
@@ -328,6 +337,20 @@ mod tests {
     }
 
     // ---------- sanitize_prompt_hotkeys ----------
+
+    // 评审 2026-09-10 I18：热键回调工作必须离开调用线程（主线程）执行
+    #[test]
+    fn hotkey_work_runs_off_caller_thread() {
+        let caller = std::thread::current().id();
+        let (tx, rx) = std::sync::mpsc::channel();
+        spawn_hotkey_work(move || {
+            let _ = tx.send(std::thread::current().id());
+        });
+        let worker = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("后台线程必须在超时内执行");
+        assert_ne!(worker, caller, "回调工作不得在调用线程内联执行");
+    }
 
     // 评审 2026-09-10 M7#10：导入路径绕过 UI 的修饰键强制，裸键在此兜底清空
     #[test]

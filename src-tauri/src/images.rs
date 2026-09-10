@@ -2,25 +2,24 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
-use tauri::Wry;
 
 /// 图片文件目录：<data_dir>/images。与 data.json 一致走 resolve_data_dir，
 /// 保证 PROMPTMATE_DATA_DIR 隔离对图片同样生效（E2E 不污染真实用户数据）
-pub fn dir(app: &tauri::AppHandle) -> PathBuf {
+pub fn dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
     crate::store::resolve_data_dir(app)
         .map(|d| d.join("images"))
         .unwrap_or_else(|_| std::env::temp_dir().join("prompt-tool-images"))
 }
 
-fn ensure_dir(app: &tauri::AppHandle) -> PathBuf {
+fn ensure_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
     let d = dir(app);
     let _ = std::fs::create_dir_all(&d);
     d
 }
 
 /// 保存 RGBA 原图并生成宽 160 的缩略图，返回文件名
-pub fn save_png(
-    app: &tauri::AppHandle,
+pub fn save_png<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     id: &str,
     width: u32,
     height: u32,
@@ -47,7 +46,7 @@ pub fn save_png(
     Ok(file)
 }
 
-pub fn read_png(app: &tauri::AppHandle<Wry>, file: &str) -> Result<Vec<u8>, String> {
+pub fn read_png<R: tauri::Runtime>(app: &tauri::AppHandle<R>, file: &str) -> Result<Vec<u8>, String> {
     // 文件名由程序生成（uuid.png），防御性校验防止路径穿越
     if file.contains("..") || file.contains('/') || file.contains('\\') {
         return Err("非法文件名".into());
@@ -68,7 +67,7 @@ pub fn png_base64(bytes: &[u8]) -> String {
     )
 }
 
-pub fn delete_files(app: &tauri::AppHandle, id: &str) {
+pub fn delete_files<R: tauri::Runtime>(app: &tauri::AppHandle<R>, id: &str) {
     // 与 read_png 对齐的形状校验（评审 2026-09-10 M8#11，防御深度）：
     // 当前调用点全部传库内 uuid，但 `..`/路径分隔符一旦进来就是任意删文件
     if id.contains("..") || id.contains('/') || id.contains('\\') || id.contains(':') {

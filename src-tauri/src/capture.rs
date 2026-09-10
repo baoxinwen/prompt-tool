@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime};
 
 /// 捕获流程在途标志：从触发到窗口显示约 280ms（等待 Ctrl+C 生效），
 /// 期间窗口仍不可见，仅靠 is_visible 挡不住快速二次触发
@@ -28,7 +28,7 @@ impl Drop for CaptureGuard {
 }
 
 /// 快速捕获：模拟 Ctrl+C 抓取当前选中文本，弹出小窗让用户保存为新提示词
-pub fn start(app: &AppHandle) {
+pub fn start<R: Runtime>(app: &AppHandle<R>) {
     // 已在捕获流程中（窗口已显示）时忽略重复触发
     if let Some(win) = app.get_webview_window("capture") {
         if win.is_visible().unwrap_or(false) {
@@ -100,7 +100,7 @@ pub fn start(app: &AppHandle) {
     });
 }
 
-fn show_capture_window(app: &AppHandle) {
+fn show_capture_window<R: Runtime>(app: &AppHandle<R>) {
     let Some(win) = app.get_webview_window("capture") else {
         return;
     };
@@ -121,7 +121,7 @@ fn show_capture_window(app: &AppHandle) {
 }
 
 /// 关闭（隐藏）捕获窗口
-pub fn hide(app: &AppHandle) {
+pub fn hide<R: Runtime>(app: &AppHandle<R>) {
     if let Some(win) = app.get_webview_window("capture") {
         let _ = win.hide();
     }

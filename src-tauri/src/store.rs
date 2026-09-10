@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 
 use crate::creds::{CredentialBackend, CredMemo, KeyringBackend};
 use crate::models::{AppData, ClipboardItem};
@@ -130,7 +130,7 @@ fn load_or_recover_with(
 }
 
 /// 对 Mutex 中毒场景的容错取锁
-pub fn lock(app: &tauri::AppHandle) -> std::sync::MutexGuard<'_, Store> {
+pub fn lock<R: Runtime>(app: &tauri::AppHandle<R>) -> std::sync::MutexGuard<'_, Store> {
     use tauri::Manager;
     let store: &SharedStore = app.state::<SharedStore>().inner();
     store.lock().unwrap_or_else(|p| p.into_inner())
@@ -138,7 +138,7 @@ pub fn lock(app: &tauri::AppHandle) -> std::sync::MutexGuard<'_, Store> {
 
 /// 应用数据目录。自动化测试可通过环境变量 PROMPTMATE_DATA_DIR 覆盖，
 /// 避免真机 E2E 读写用户真实数据；正常启动不受影响
-pub(crate) fn resolve_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn resolve_data_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     if let Ok(dir) = std::env::var("PROMPTMATE_DATA_DIR") {
         if !dir.trim().is_empty() {
             return Ok(PathBuf::from(dir));
@@ -150,7 +150,7 @@ pub(crate) fn resolve_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 impl Store {
-    pub fn load(app: &AppHandle) -> Result<Self, String> {
+    pub fn load<R: Runtime>(app: &AppHandle<R>) -> Result<Self, String> {
         let dir = resolve_data_dir(app)?;
         std::fs::create_dir_all(&dir).map_err(|e| format!("创建数据目录失败: {e}"))?;
         let path = dir.join("data.json");

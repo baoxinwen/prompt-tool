@@ -2,10 +2,10 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::models::{new_id, now_ms, ClipboardItem, ImageRef, MAX_CLIPBOARD_ITEMS};
-use crate::store::lock;
+use crate::store::{lock, Store};
 
 /// 剪贴板监听轮询周期（毫秒）。各写入路径的抑制窗口由它派生，
 /// 改动此值会同步改变全部抑制窗口
@@ -53,7 +53,7 @@ fn image_hash(width: usize, height: usize, data: &[u8]) -> u64 {
 }
 
 /// 后台轮询剪贴板，把系统内新复制的内容记入历史（文本与图片）
-pub fn spawn(app: AppHandle) {
+pub fn spawn<R: Runtime + 'static>(app: AppHandle<R>) {
     std::thread::spawn(move || {
         let Ok(mut board) = arboard::Clipboard::new() else {
             eprintln!("[clipboard] 无法打开剪贴板，历史记录不可用");
@@ -105,11 +105,15 @@ pub fn spawn(app: AppHandle) {
     });
 }
 
-fn record_text(app: &AppHandle, text: String) -> bool {
-    let mut store = lock(app);
-    if store.suppress_clipboard || !store.data.settings.capture_clipboard {
-        return false;
-    }
+/// 记录门控（评审 2026-09-10 I20）：抑制中或用户关闭记录开关时不得记录。
+/// 抽成纯函数便于直接测试
+fn should_record(suppress_clipboard: bool, capture_clipboard: bool) -> bool {
+    !suppress_clipboard && capture_clipboard
+}
+
+/// 文本条目入库（去重后插到顶部 + 截断 + 落盘）。从 record_text 抽出：
+/// 抑制/开关快照在锁外完成，重活（落盘）与插入在同一临界区，逻辑可独立测试
+fn insert_text_record(store: &mut Store, text: String) -> bool {
     let now = now_ms();
     store.data.clipboard.retain(|i| i.content != text);
     store.data.clipboard.insert(
@@ -130,7 +134,20 @@ fn record_text(app: &AppHandle, text: String) -> bool {
     true
 }
 
-fn record_image(app: &AppHandle, width: u32, height: u32, rgba: &[u8]) -> bool {
+fn record_text<R: Runtime>(app: &AppHandle<R>, text: String) -> bool {
+    // 门控快照在锁外读取（评审 2026-09-10 I20：锁持有时间最小化）
+    let (suppress, capture_on) = {
+        let store = lock(app);
+        (store.suppress_clipboard, store.data.settings.capture_clipboard)
+    };
+    if !should_record(suppress, capture_on) {
+        return false;
+    }
+    let mut store = lock(app);
+    insert_text_record(&mut store, text)
+}
+
+fn record_image<R: Runtime>(app: &AppHandle<R>, width: u32, height: u32, rgba: &[u8]) -> bool {
     // 快照抑制/开关状态后立即放锁（评审 2026-09-10 I20）：PNG 编码（4K 图
     // 数百 ms）绝不能在持有全局 Store 锁的状态下做，否则监听线程持锁期间
     // 所有走 lock() 的命令（get_data/粘贴/设置保存）排队阻塞，界面卡顿
@@ -188,4 +205,55 @@ fn record_image(app: &AppHandle, width: u32, height: u32, rgba: &[u8]) -> bool {
         return false;
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::MAX_CLIPBOARD_ITEMS;
+    use crate::store::Store;
+
+    // 评审 2026-09-10 I20：记录门控真值表——抑制中或关闭记录开关都不得记录
+    #[test]
+    fn should_record_gate_truth_table() {
+        assert!(!should_record(true, true), "抑制中不得记录");
+        assert!(!should_record(false, false), "关闭记录开关不得记录");
+        assert!(!should_record(true, false));
+        assert!(should_record(false, true));
+    }
+
+    // 评审 2026-09-10 I20：文本入库的去重/截断/落盘语义锁定
+    #[test]
+    fn insert_text_record_dedupes_moves_to_top_and_truncates() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::test_store(dir.path());
+        for i in 0..(MAX_CLIPBOARD_ITEMS + 5) {
+            let _ = insert_text_record(&mut store, format!("第{i}条"), );
+        }
+        assert_eq!(
+            store.data.clipboard.len(),
+            MAX_CLIPBOARD_ITEMS,
+            "超出上限必须截断"
+        );
+        assert_eq!(store.data.clipboard[0].content, "第1004条", "最新条目在顶部");
+
+        // 重复内容：去重并重新置顶，不得出现两条
+        assert!(insert_text_record(&mut store, "第1004条".into()));
+        let dupes = store
+            .data
+            .clipboard
+            .iter()
+            .filter(|i| i.content == "第1004条")
+            .count();
+        assert_eq!(dupes, 1, "重复内容必须去重");
+        assert_eq!(store.data.clipboard[0].content, "第1004条");
+    }
+
+    #[test]
+    fn insert_text_record_persists_to_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::test_store(dir.path());
+        assert!(insert_text_record(&mut store, "落盘".into()));
+        assert!(dir.path().join("data.json").exists(), "入库必须落盘");
+    }
 }
