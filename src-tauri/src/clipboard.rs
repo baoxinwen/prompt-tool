@@ -33,22 +33,17 @@ fn clipboard_sequence() -> Option<u32> {
     }
 }
 
-/// 多点采样哈希：只看首尾 32 字节时，中部内容不同的两张图（如仅改中部的截图）
-/// 会被误判为同一张而漏记历史
+/// 变化判定哈希：全量哈希整张 RGBA（评审 2026-09-10 images#12）。
+/// 旧实现的 5 段采样会让「改动恰落在采样缝隙中」的两张图被判同一张，
+/// 漏记历史；而序号预检（clipboard_sequence）已保证哈希只在剪贴板
+/// 真正变化时执行一次，全量哈希的成本（33MB 约几十毫秒、每事件一次）
+/// 可以接受，不再值得为采样引入漏判窗口
 fn image_hash(width: usize, height: usize, data: &[u8]) -> u64 {
     let mut h = DefaultHasher::new();
     width.hash(&mut h);
     height.hash(&mut h);
     data.len().hash(&mut h);
-    let n = data.len();
-    if n <= 192 {
-        data.hash(&mut h);
-    } else {
-        // 取首/1/4/中/3/4/尾五段各 64 字节
-        for start in [0, n / 4, n / 2, 3 * n / 4, n - 64] {
-            data[start..start + 64].hash(&mut h);
-        }
-    }
+    data.hash(&mut h);
     h.finish()
 }
 
@@ -212,6 +207,20 @@ mod tests {
     use super::*;
     use crate::models::MAX_CLIPBOARD_ITEMS;
     use crate::store::Store;
+
+    // 评审 2026-09-10 images#12：全量哈希后，落在旧采样窗口缝隙之外
+    // 的内容变化也必须被识别（旧采样实现会误判为同一张而漏记）
+    #[test]
+    fn image_hash_detects_changes_outside_sampled_windows() {
+        let n = 4096;
+        let a = vec![0u8; n];
+        let mut b = a.clone();
+        b[n / 2 + 200] = 1; // 不落在旧实现的 5 个 64 字节采样窗口（0/¼/½/¾/尾）内
+        let ha = image_hash(100, 100, &a);
+        let hb = image_hash(100, 100, &b);
+        assert_ne!(ha, hb, "采样缝隙内的内容变化不得漏判");
+        assert_eq!(ha, image_hash(100, 100, &a), "同内容哈希必须稳定");
+    }
 
     // 评审 2026-09-10 I20：记录门控真值表——抑制中或关闭记录开关都不得记录
     #[test]
