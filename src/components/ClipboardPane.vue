@@ -300,7 +300,7 @@ onBeforeUnmount(() => {
   gap: 8px;
   font-size: var(--fs-lg);
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: normal;
 }
 
 .cb-count {
@@ -333,14 +333,14 @@ onBeforeUnmount(() => {
 
 .search-box input {
   padding: 6px 52px 6px 28px;
-  font-size: 12.5px;
+  font-size: 13px;
   width: 190px;
 }
 
 .search-hint {
   position: absolute;
   right: 7px;
-  font-size: 9.5px;
+  font-size: 10px;
   padding: 2px 5px;
   pointer-events: none;
   color: var(--faint);
@@ -406,7 +406,7 @@ onBeforeUnmount(() => {
 
 .truncated {
   text-align: center;
-  font-size: 11.5px;
+  font-size: 12px;
   padding: 6px 0;
 }
 
@@ -443,7 +443,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   user-select: text;
   color: var(--text-2);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.55;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -472,7 +472,7 @@ onBeforeUnmount(() => {
 }
 
 .time {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--faint);
 }
 
@@ -547,7 +547,7 @@ onBeforeUnmount(() => {
 
 .detail-body {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
@@ -574,7 +574,7 @@ onBeforeUnmount(() => {
 }
 
 .detail-foot kbd {
-  font-size: 9.5px;
+  font-size: 10px;
 }
 
 .detail-copy {

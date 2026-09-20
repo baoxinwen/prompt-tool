@@ -155,7 +155,7 @@ function onKeydown(e: KeyboardEvent, index: number) {
 }
 
 .vd-title {
-  font-size: 14.5px;
+  font-size: 15px;
   font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -164,7 +164,7 @@ function onKeydown(e: KeyboardEvent, index: number) {
 
 .vd-count {
   margin-left: auto;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--brand);
   background: var(--brand-soft);
   padding: 2.5px 10px;
@@ -205,7 +205,7 @@ function onKeydown(e: KeyboardEvent, index: number) {
 }
 
 .vd-hint {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -222,12 +222,12 @@ function onKeydown(e: KeyboardEvent, index: number) {
 }
 
 .vd-tips {
-  font-size: 11.5px;
+  font-size: 12px;
   margin-right: auto;
 }
 
 .vd-tips kbd {
-  font-size: 9.5px;
+  font-size: 10px;
   padding: 2px 5px;
 }
 </style>

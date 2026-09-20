@@ -191,7 +191,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCaptureKeydown, tr
 }
 
 .cap-hint {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--muted);
 }
 

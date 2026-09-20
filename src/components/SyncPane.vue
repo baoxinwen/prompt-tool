@@ -478,7 +478,7 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 .sync-title {
   font-size: var(--fs-lg);
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: normal;
 }
 
 .on-badge {
@@ -735,7 +735,7 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 
 .opt {
   gap: 10px;
-  font-size: 12.5px;
+  font-size: 13px;
   cursor: pointer;
 }
 
@@ -763,12 +763,12 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
   gap: 8px;
   padding: 9px 12px;
   border-radius: var(--r-sm);
-  font-size: 12.5px;
+  font-size: 13px;
   border: 1px solid;
 }
 
 .status-prompt {
-  font-size: 10.5px;
+  font-size: 11px;
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--panel-3);
@@ -788,7 +788,7 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 }
 
 .note {
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.7;
   padding-bottom: 8px;
 }

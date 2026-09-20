@@ -57,13 +57,13 @@
   --font-display: 'Noto Serif SC', Georgia, 'Times New Roman', 'STSong', serif;
   --font-mono: 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
 
-  /* 字阶（6 级） */
-  --fs-xs: 11px;
-  --fs-sm: 12px;
-  --fs-base: 13px;
-  --fs-lg: 15px;
-  --fs-xl: 18px;
-  --fs-2xl: 23px;
+  /* 字阶（6 级，全整数——中文在小数像素字号会亚像素缩放发虚） */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 19px;
+  --fs-2xl: 24px;
 
   /* z-index 刻度 */
   --z-base: 0;

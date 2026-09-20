@@ -194,7 +194,7 @@ onBeforeUnmount(() => {
 
 .cv-title {
   font-weight: 650;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .grow {
@@ -212,7 +212,7 @@ onBeforeUnmount(() => {
 
 .cv-title-input {
   margin: 0 12px;
-  font-size: 13.5px;
+  font-size: 14px;
   padding: 7px 10px;
 }
 
@@ -252,7 +252,7 @@ onBeforeUnmount(() => {
   border-color: color-mix(in srgb, var(--on-brand) 28%, transparent);
   box-shadow: none;
   color: var(--on-brand);
-  font-size: 9.5px;
+  font-size: 10px;
   padding: 2px 5px;
 }
 
@@ -279,7 +279,7 @@ select {
 
 .cv-err-row {
   margin: 0 12px;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--danger);
   word-break: break-all;

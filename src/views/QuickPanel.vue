@@ -639,7 +639,7 @@ onBeforeUnmount(() => {
 .qp-search {
   flex: 1;
   min-width: 0;
-  font-size: 14.5px;
+  font-size: 15px;
   padding: 10px 0;
   background: transparent;
   border: none;
@@ -757,7 +757,7 @@ onBeforeUnmount(() => {
 
 .truncated {
   text-align: center;
-  font-size: 11.5px;
+  font-size: 12px;
   padding: 8px 0 4px;
 }
 
@@ -805,7 +805,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 5px;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -826,7 +826,7 @@ onBeforeUnmount(() => {
 }
 
 .count {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--faint);
 }
 
@@ -898,7 +898,7 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
   flex: none;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -910,13 +910,13 @@ onBeforeUnmount(() => {
 }
 
 .hint kbd {
-  font-size: 9.5px;
+  font-size: 10px;
   padding: 2px 4.5px;
   min-width: 0;
 }
 
 .count-all {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--faint);
 }
 
@@ -954,7 +954,7 @@ onBeforeUnmount(() => {
 
 .detail-body {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
@@ -971,7 +971,7 @@ onBeforeUnmount(() => {
 }
 
 .detail-foot kbd {
-  font-size: 9.5px;
+  font-size: 10px;
 }
 
 .sm {

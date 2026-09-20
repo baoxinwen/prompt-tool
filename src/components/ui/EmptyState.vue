@@ -32,7 +32,7 @@ withDefaults(
 }
 
 .empty-mark {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--faint);
   letter-spacing: 1px;
   opacity: 0.85;
@@ -58,7 +58,7 @@ withDefaults(
 
 .empty-desc {
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 13px;
   max-width: 300px;
   line-height: 1.6;
 }

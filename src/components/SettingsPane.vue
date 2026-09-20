@@ -303,7 +303,7 @@ onMounted(() => {
 .st-title {
   font-size: var(--fs-lg);
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: normal;
 }
 
 .st-body {
@@ -346,7 +346,7 @@ onMounted(() => {
 }
 
 h3 {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 650;
 }
 
@@ -368,11 +368,11 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .opt small {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 400;
 }
 
@@ -468,7 +468,7 @@ h3 {
 }
 
 .about {
-  font-size: 11.5px;
+  font-size: 12px;
   padding: 2px 0 12px;
 }
 </style>

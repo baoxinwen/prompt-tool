@@ -181,7 +181,7 @@ onBeforeUnmount(() => {
 .de-title {
   font-size: var(--fs-lg);
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: normal;
 }
 
 .de-body {
@@ -223,7 +223,7 @@ onBeforeUnmount(() => {
 }
 
 .dz-mark {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--faint);
   letter-spacing: 1px;
   user-select: none;
@@ -240,7 +240,7 @@ onBeforeUnmount(() => {
 }
 
 .desc {
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.65;
   max-width: 380px;
 }
@@ -253,7 +253,7 @@ onBeforeUnmount(() => {
 .merge-line {
   display: inline-block;
   margin-top: 4px;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.6;
   color: var(--ok);
   background: var(--ok-soft);
@@ -263,7 +263,7 @@ onBeforeUnmount(() => {
 }
 
 .merge-note {
-  font-size: 11.5px;
+  font-size: 12px;
   margin-top: 2px;
 }
 
@@ -320,7 +320,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 22px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-2);
 }
 
@@ -331,7 +331,7 @@ onBeforeUnmount(() => {
 }
 
 .note {
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.7;
   padding: 12px 22px 16px;
   flex: none;

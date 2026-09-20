@@ -835,7 +835,7 @@ function fmtTime(ts: number) {
   gap: 8px;
   font-size: var(--fs-lg);
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: normal;
 }
 
 .pp-count {
@@ -862,14 +862,14 @@ function fmtTime(ts: number) {
 
 .search-box input {
   padding: 6px 52px 6px 28px;
-  font-size: 12.5px;
+  font-size: 13px;
   width: 230px;
 }
 
 .search-hint {
   position: absolute;
   right: 7px;
-  font-size: 9.5px;
+  font-size: 10px;
   padding: 2px 5px;
   pointer-events: none;
   color: var(--faint);
@@ -911,7 +911,7 @@ function fmtTime(ts: number) {
 .chip {
   padding: 3.5px 10px;
   border-radius: 999px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--muted);
   background: var(--panel);
   gap: 6px;
@@ -965,7 +965,7 @@ function fmtTime(ts: number) {
 .chip-input {
   width: 132px;
   padding: 4px 10px;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 /* 列表：扁平行 */
@@ -1012,7 +1012,7 @@ function fmtTime(ts: number) {
   align-items: center;
   gap: 5px;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1041,7 +1041,7 @@ function fmtTime(ts: number) {
 }
 
 .use-n {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--faint);
 }
 
@@ -1058,7 +1058,7 @@ function fmtTime(ts: number) {
 
 .pitem-preview {
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: 12px;
   margin-top: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1120,7 +1120,7 @@ function fmtTime(ts: number) {
 }
 
 .d-cat {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 650;
   letter-spacing: 0.5px;
   color: var(--muted);
@@ -1130,7 +1130,7 @@ function fmtTime(ts: number) {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11.5px;
+  font-size: 12px;
   padding: 3.5px 10px;
   border-radius: 999px;
   color: var(--muted);
@@ -1147,7 +1147,7 @@ function fmtTime(ts: number) {
   background: transparent;
   font-size: 20px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: normal;
   padding: 4px 0 2px;
   color: var(--text);
 }
@@ -1215,7 +1215,7 @@ function fmtTime(ts: number) {
   width: 100%;
   height: 100%;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.65;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -1306,7 +1306,7 @@ function fmtTime(ts: number) {
 }
 
 .d-input {
-  font-size: 12.5px;
+  font-size: 13px;
   padding: 7px 10px;
 }
 
@@ -1344,7 +1344,7 @@ function fmtTime(ts: number) {
   background: transparent;
   border-color: var(--border);
   color: var(--text-2);
-  font-size: 12.5px;
+  font-size: 13px;
   padding: 7px 14px;
 }
 
