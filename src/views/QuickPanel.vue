@@ -444,14 +444,26 @@ onBeforeUnmount(() => {
     >
       <div ref="listInnerEl" class="qp-list-inner">
       <template v-if="mode === 'prompts'">
-        <div
-          v-for="(p, i) in prompts"
-          :key="p.id"
-          class="item"
-          :class="{ active: i === active }"
-          @mouseenter="active = i"
-          @click="activate(p, false)"
-        >
+        <!-- 无搜索词时按置顶/最近分区（搜索时统一按相关度排序，不分区） -->
+        <template v-for="(p, i) in prompts" :key="p.id">
+          <div
+            v-if="!query.trim() && p.pinned && (i === 0 || !prompts[i - 1].pinned)"
+            class="grp-h"
+          >
+            置顶
+          </div>
+          <div
+            v-if="!query.trim() && !p.pinned && (i === 0 || prompts[i - 1].pinned)"
+            class="grp-h"
+          >
+            最近
+          </div>
+          <div
+            class="item"
+            :class="{ active: i === active }"
+            @mouseenter="active = i"
+            @click="activate(p, false)"
+          >
           <div class="item-line">
             <span class="item-title">
               <Pin v-if="p.pinned" :size="13" class="pin" />
@@ -472,7 +484,8 @@ onBeforeUnmount(() => {
               <template v-else>{{ seg.t }}</template>
             </template>
           </div>
-        </div>
+          </div>
+        </template>
         <div v-if="hiddenCount > 0" class="truncated muted">
           还有 {{ hiddenCount }} 条未显示，输入关键词继续筛选
         </div>
@@ -940,6 +953,20 @@ onBeforeUnmount(() => {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 10px 4px 0;
+}
+
+/* 提示词分区头（置顶/最近）：同 .grp 丝印族，首分区不加顶距 */
+.grp-h {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--faint);
+  letter-spacing: 0.08em;
+  padding: 8px 4px 2px;
+}
+
+.grp-h:first-child {
+  padding-top: 2px;
 }
 
 /* 类型图标独立列（与主窗口 ClipboardPane .kind-ico 同族） */

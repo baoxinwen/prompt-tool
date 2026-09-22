@@ -290,7 +290,8 @@ const tabs = [
             :aria-label="t.label"
             @click="switchTab(t.id)"
           >
-            <component :is="t.icon" :size="18" :stroke-width="1.9" />
+            <component :is="t.icon" :size="16" :stroke-width="1.9" />
+            <span class="nav-label">{{ t.label }}</span>
           </button>
         </nav>
 
@@ -455,18 +456,27 @@ const tabs = [
   gap: 4px;
 }
 
-/* 透明键：hover 换面色 + 图标弹性放大，本体不位移 */
+/* 透明键：图标+微标签纵排，hover 换面色 + 图标弹性放大，本体不位移 */
 .nav-btn {
   position: relative;
-  width: 40px;
-  height: 40px;
-  padding: 0;
+  width: 48px;
+  height: auto;
+  padding: 6px 0 5px;
   border: none;
   background: transparent;
   border-radius: var(--r-sm);
   color: var(--muted);
   box-shadow: none;
+  flex-direction: column;
+  gap: 3px;
   transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+}
+
+.nav-label {
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: inherit;
 }
 
 .nav-btn:hover {

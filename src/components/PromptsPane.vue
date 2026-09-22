@@ -1092,9 +1092,11 @@ function fmtTime(ts: number) {
   font-weight: 700;
 }
 
+/* 次要信息行（快捷键/次数/变量数）：右对齐成尾部信息列，主行只留标题+徽章 */
 .pitem-row {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
   margin-top: 4px;
 }
@@ -1157,7 +1159,7 @@ function fmtTime(ts: number) {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--panel);
-  padding: 14px 16px;
+  padding: 11px 14px;
   flex: none;
   overflow: hidden;
 }
@@ -1211,7 +1213,7 @@ function fmtTime(ts: number) {
   font-size: 20px;
   font-weight: 700;
   letter-spacing: normal;
-  padding: 4px 0 2px;
+  padding: 2px 0 0;
   color: var(--text);
 }
 
@@ -1236,8 +1238,8 @@ function fmtTime(ts: number) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px 0;
+  gap: 10px;
+  padding: 10px 0;
 }
 
 .d-card {
@@ -1248,6 +1250,11 @@ function fmtTime(ts: number) {
   display: flex;
   flex-direction: column;
   gap: 9px;
+}
+
+/* 内容卡撑满剩余高度：消除正文短时的底部死空间（密度=结构贴合，不压字号与留白） */
+.d-body > .d-card:first-child {
+  flex: 1 0 auto;
 }
 
 .d-card-head {
