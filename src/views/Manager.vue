@@ -489,15 +489,16 @@ const tabs = [
   box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.14);
 }
 
-/* 激活 = 按住的黑键：内陷 + 反白，左标条同键色 */
+/* 激活 = 按下的凹面键（反馈轮：选中不用黑）：凹底 + 内陷 + 深色图标 */
 .nav-btn.on {
-  background: var(--brand-btn);
-  color: var(--on-brand);
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--edge-strong);
+  background: var(--sel-bg);
+  color: var(--text);
+  border-color: transparent;
+  box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.1), 0 0 0 1px var(--border-strong);
 }
 
 .nav-btn.on:active {
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.35), 0 0 0 1px var(--edge-strong);
+  box-shadow: inset 0 2px 5px rgba(17, 17, 17, 0.14), 0 0 0 1px var(--border-strong);
 }
 
 .nav-btn.on::before {
@@ -508,7 +509,7 @@ const tabs = [
   bottom: 9px;
   width: 3px;
   border-radius: 3px;
-  background: var(--brand-btn);
+  background: var(--sel-bar);
 }
 
 .side-foot {

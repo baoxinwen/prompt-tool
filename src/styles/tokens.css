@@ -114,6 +114,11 @@
   /* 变量记号（{{名}} 凹井刻痕）：石墨刻字，两主题都解析为具体值（评审 I10） */
   --var: var(--g-300);
 
+  /* 选中态（反馈轮 2026-09-22：选中不用黑）：按下的凹面 + 深灰标条，
+     黑色只留给主操作按钮——「选中」靠物理不靠填色 */
+  --sel-bg: var(--n-500);
+  --sel-bar: #c4c4c4;
+
   /* 交互 */
   --accent: var(--brand);
   /* 实体键三面（暗色键）：key-1 亮面 / key-2 暗面 / edge 厚度硬底边 */
@@ -171,10 +176,10 @@
    light 与 auto(亮) 两个覆盖块都只引用这里的 --lt-* 中间层，
    调色只改这一处，杜绝两块手抄漂移 */
 :root {
-  --lt-brand: var(--g-950);
-  --lt-brand-strong: var(--g-1000);
-  --lt-brand-btn: var(--g-950);
-  --lt-brand-btn-hover: var(--g-1000);
+  --lt-brand: var(--g-900);
+  --lt-brand-strong: var(--g-950);
+  --lt-brand-btn: var(--g-900);
+  --lt-brand-btn-hover: var(--g-950);
   --lt-on-brand: #ffffff;
   --lt-brand-2: var(--g-800);
   --lt-brand-soft: rgba(28, 28, 28, 0.055);
@@ -223,6 +228,9 @@
     0 32px 72px rgba(17, 17, 17, 0.16);
   --lt-shadow-brand: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 1.5px 0 rgba(0, 0, 0, 0.55),
     0 2px 8px rgba(17, 17, 17, 0.22);
+
+  --lt-sel-bg: var(--g-200);
+  --lt-sel-bar: var(--g-800);
 }
 
 /* ---------- 亮色主题：「纸面仪器」 ---------- */
@@ -251,6 +259,8 @@
   --muted: var(--lt-muted);
   --faint: var(--lt-faint);
   --var: var(--lt-var);
+  --sel-bg: var(--lt-sel-bg);
+  --sel-bar: var(--lt-sel-bar);
 
   --danger: var(--lt-danger);
   --danger-btn: var(--lt-danger-btn);
@@ -312,6 +322,8 @@
     --muted: var(--lt-muted);
     --faint: var(--lt-faint);
     --var: var(--lt-var);
+  --sel-bg: var(--lt-sel-bg);
+  --sel-bar: var(--lt-sel-bar);
 
     --danger: var(--lt-danger);
     --danger-btn: var(--lt-danger-btn);

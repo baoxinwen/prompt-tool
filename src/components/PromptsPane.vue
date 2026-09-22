@@ -935,27 +935,26 @@ function fmtTime(ts: number) {
   color: var(--faint);
 }
 
-/* 选中分类 = 按住的黑键：浮起键按下即选中，不再位移 */
+/* 选中分类 = 按下的凹面键（反馈轮：选中不用黑） */
 .chip.on {
-  background: var(--brand-btn);
-  border-color: var(--edge-strong);
-  color: var(--on-brand);
-  box-shadow: var(--shadow-brand);
+  background: var(--sel-bg);
+  border-color: var(--border-strong);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.08);
   transform: none;
 }
 
 .chip.on .chip-n {
-  color: var(--on-brand);
-  opacity: 0.72;
+  color: var(--text-2);
 }
 
 .chip.on .chip-ops {
-  color: var(--on-brand);
-  opacity: 0.72;
+  color: var(--text-2);
 }
 
 .chip.on .chip-ops svg:hover {
-  color: var(--on-brand);
+  color: var(--text);
   opacity: 1;
 }
 
@@ -1050,7 +1049,7 @@ function fmtTime(ts: number) {
   background: var(--panel-2);
 }
 
-/* 选中行：按下感——描边 + 顶部内阴影 + 左侧黑标条（不做整行黑底） */
+/* 选中行：按下感——凹面描边 + 顶部内阴影 + 深灰标条（反馈轮：选中不用黑） */
 .pitem.on {
   background: var(--panel);
   box-shadow: inset 0 0 0 1px var(--border-strong), inset 0 2px 4px rgba(17, 17, 17, 0.06);
@@ -1064,7 +1063,7 @@ function fmtTime(ts: number) {
   bottom: 8px;
   width: 3px;
   border-radius: 2px;
-  background: var(--brand);
+  background: var(--sel-bar);
 }
 
 .pitem-title {

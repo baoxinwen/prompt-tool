@@ -731,11 +731,12 @@ onBeforeUnmount(() => {
 
 /* 激活 = 按住的黑键 */
 .chip.on {
-  background: var(--brand-btn);
-  border-color: var(--edge-strong);
-  color: var(--on-brand);
+  background: var(--sel-bg);
+  border-color: var(--border-strong);
+  color: var(--text);
+  font-weight: 600;
   transform: none;
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 0 0 1px var(--border-strong), inset 0 2px 4px rgba(17, 17, 17, 0.08);
 }
 
 .chip.on:active {
@@ -804,10 +805,11 @@ onBeforeUnmount(() => {
   background: var(--panel-2);
 }
 
+/* 选中 = 按下的凹面（反馈轮：选中不用黑）——凹底 + 内陷 + 深灰标条，黑色只留主操作 */
 .item.active {
-  background: var(--brand-btn);
-  color: var(--on-brand);
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.3);
+  background: var(--sel-bg);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border-strong), inset 0 2px 4px rgba(17, 17, 17, 0.08);
 }
 
 .item.active::before {
@@ -818,7 +820,7 @@ onBeforeUnmount(() => {
   bottom: 8px;
   width: 2.5px;
   border-radius: 3px;
-  background: var(--on-brand);
+  background: var(--sel-bar);
 }
 
 /* stagger 入场：逐条上浮（--stagger 步进，第 8 条起 280ms 封顶） */
@@ -864,12 +866,6 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
-/* 黑键行内的高亮：反白 + 下划线保持可读 */
-.item.active .hl {
-  color: var(--on-brand);
-  text-decoration: underline;
-}
-
 .item-line {
   display: flex;
   align-items: center;
@@ -894,11 +890,6 @@ onBeforeUnmount(() => {
   flex: none;
 }
 
-/* 黑键行内的图钉记号统一反白（琥珀在黑/白键面上对比不足） */
-.item.active .pin {
-  color: var(--on-brand);
-}
-
 .item-meta {
   display: inline-flex;
   align-items: center;
@@ -909,10 +900,6 @@ onBeforeUnmount(() => {
 .count {
   font-size: 11px;
   color: var(--faint);
-}
-
-.item.active .count {
-  color: color-mix(in srgb, var(--on-brand) 65%, transparent);
 }
 
 /* 预览统一两行截断（与主窗口剪贴板页 .content 同族）；.two 仅表示 active
@@ -929,12 +916,6 @@ onBeforeUnmount(() => {
   word-break: break-word;
 }
 
-/* 黑键行内的预览/时间等次级文字：反白刻字 */
-.item.active .item-preview,
-.item.active .faint {
-  color: color-mix(in srgb, var(--on-brand) 72%, transparent);
-}
-
 /* {{变量}} chip：凹井里的刻痕（--var 石墨刻字），两视图同族 */
 .var-chip {
   display: inline-block;
@@ -948,13 +929,6 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
-}
-
-/* 黑键行内的变量刻痕：换反白凹印，保可读 */
-.item.active .var-chip {
-  background: color-mix(in srgb, var(--on-brand) 8%, transparent);
-  border-color: color-mix(in srgb, var(--on-brand) 24%, transparent);
-  color: color-mix(in srgb, var(--on-brand) 85%, transparent);
 }
 
 /* 剪贴板时间分组头：丝印小铭牌（与主窗口 ClipboardPane .grp 同族） */
@@ -979,13 +953,6 @@ onBeforeUnmount(() => {
   color: var(--faint);
   background: var(--panel-2);
   border: 1px solid var(--border);
-}
-
-/* 黑键行内的类型图标：反白成键面上的小键 */
-.item.active .kind-ico {
-  background: var(--on-brand);
-  color: var(--brand-btn);
-  border-color: transparent;
 }
 
 .item-img {
