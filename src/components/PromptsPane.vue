@@ -1101,21 +1101,26 @@ function fmtTime(ts: number) {
   margin-top: 4px;
 }
 
+/* 次要信息（快捷键/次数/变量数）：右对齐尾部一行，纯等宽文字不加盒——
+   盒子是「三数据堆积」臃肿感的来源，徽章是行内唯一的框 */
 .use-n {
+  font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--faint);
+  color: var(--muted);
 }
 
-/* 「N 个变量」计数 chip：凹井刻痕族（--var 石墨刻字），与预览 var-mark 同族 */
+/* 「N 个变量」计数：与次数同行的安静等宽文字（守卫测试依赖文本存在），
+   中点分隔，无 chip 盒 */
 .var-n {
   font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1.6;
-  color: var(--var);
-  background: color-mix(in srgb, var(--var) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--var) 22%, transparent);
-  padding: 0 6px;
-  border-radius: var(--r-xs);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.var-n::before {
+  content: '·';
+  margin: 0 5px 0 1px;
+  color: var(--faint);
 }
 
 .pitem-preview {

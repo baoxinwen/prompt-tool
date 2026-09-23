@@ -197,10 +197,11 @@
   --lt-border-strong: rgba(28, 28, 28, 0.22);
   --lt-text: var(--g-950);
   /* text-2/muted/faint 对 bg（浅灰页底）≥ 4.5:1（WCAG AA，评审 I8），
-     层级单调：text-2(#4a4a4a) > muted(#616161) > faint(#6e6e6e) */
+     层级单调：text-2(#4a4a4a) > muted(#595959) > faint(#666666)；
+     反馈轮 2026-09-23：小字灰显发糊，muted/faint 各加深一档提锐度 */
   --lt-text-2: #4a4a4a;
-  --lt-muted: #616161;
-  --lt-faint: #6e6e6e;
+  --lt-muted: #595959;
+  --lt-faint: #666666;
 
   --lt-danger: var(--signal-red);
   --lt-danger-btn: var(--signal-red);
