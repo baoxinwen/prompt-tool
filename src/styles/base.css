@@ -1,6 +1,7 @@
 /* ============================================
    基础样式：reset + 通用组件类
-   视觉语言：墨与纸——暖纸底 / 碳墨强调 / 键帽与等宽记号 / 零渐变零光晕
+   视觉语言：黑白仪器——纯中性灰阶 / 黑即品牌 / 实体键光影物理
+   （顶部高光 + 1.5px 硬底边 + 按压内陷）/ 凹槽井 / 丝印等宽铭牌
    ============================================ */
 
 * {
@@ -40,7 +41,7 @@ body[data-window='capture'] {
   background: var(--brand-soft-2);
 }
 
-/* 键盘导航可见焦点环（鼠标点击不触发） */
+/* 键盘导航可见焦点环（鼠标点击不触发）：黑描边环 */
 :focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
@@ -55,7 +56,7 @@ button {
   color: inherit;
 }
 
-/* ---------- 表单控件 ---------- */
+/* ---------- 表单控件：凹槽井（recessed well，靠内阴影下压而非改色） ---------- */
 
 input[type='text'],
 input[type='password'],
@@ -64,10 +65,11 @@ textarea,
 select {
   background: var(--input-bg);
   border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-key);
   padding: 8px 11px;
   outline: none;
   color: var(--text);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
   transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
   user-select: text;
 }
@@ -82,7 +84,7 @@ textarea:focus,
 select:focus {
   border-color: var(--brand);
   background: var(--input-focus-bg);
-  box-shadow: 0 0 0 3px var(--brand-soft);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.03), 0 0 0 3px var(--brand-soft);
 }
 
 textarea {
@@ -94,16 +96,19 @@ select {
   cursor: pointer;
 }
 
-/* ---------- 按钮 ---------- */
+/* ---------- 按钮：纸面实体键（浮起 → 悬停上浮 → 按下内陷） ---------- */
 
 button {
   border: 1px solid var(--border);
-  background: var(--panel-2);
-  border-radius: var(--r-sm);
+  background: linear-gradient(180deg, var(--key-1) 0%, var(--key-2) 100%);
+  border-radius: var(--r-key);
   padding: 6px 14px;
   cursor: pointer;
-  transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast),
-    box-shadow var(--t-fast), color var(--t-fast);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1.5px 0 var(--edge),
+    0 2px 4px rgba(17, 17, 17, 0.06);
+  transition: transform var(--t-spring), background var(--t-fast), border-color var(--t-fast),
+    box-shadow var(--t-spring), color var(--t-fast);
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
@@ -112,24 +117,37 @@ button {
 }
 
 button:hover {
-  background: var(--panel-3);
+  background: linear-gradient(180deg, var(--key-1) 0%, var(--key-2) 100%);
   border-color: var(--border-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 1.5px 0 var(--edge-strong),
+    0 4px 10px rgba(17, 17, 17, 0.1);
+  transform: translateY(-1px);
 }
 
 button:active {
-  transform: scale(0.97);
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.14), 0 0 0 var(--edge);
 }
 
-/* 主操作：全应用唯一的实心墨块（亮色=碳墨，暗色=骨白反白） */
+/* 主操作：全应用唯一的黑键（亮色=石墨黑，暗色=白键反白） */
 button.primary {
-  background: var(--brand-btn);
-  border: 1px solid transparent;
+  background: linear-gradient(180deg, var(--brand-btn) 0%, var(--brand-strong) 100%);
+  border: 1px solid var(--edge-strong);
   color: var(--on-brand);
   font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 1.5px 0 var(--edge-strong),
+    0 2px 6px rgba(17, 17, 17, 0.2);
 }
 
 button.primary:hover {
-  background: var(--brand-btn-hover);
+  background: linear-gradient(180deg, var(--brand-btn-hover) 0%, var(--brand-strong) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1.5px 0 var(--edge-strong),
+    0 4px 10px rgba(17, 17, 17, 0.24);
+}
+
+button.primary:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.35), 0 0 0 var(--edge-strong);
 }
 
 button.danger {
@@ -144,10 +162,18 @@ button.danger:hover {
 button.ghost {
   border-color: transparent;
   background: transparent;
+  box-shadow: none;
 }
 
 button.ghost:hover {
   background: var(--panel-2);
+  border-color: var(--border);
+  transform: none;
+}
+
+button.ghost:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.1);
 }
 
 button:disabled {
@@ -155,6 +181,8 @@ button:disabled {
   background: var(--panel-2);
   color: var(--muted);
   border-color: var(--border);
+  box-shadow: none;
+  transform: none;
   cursor: default;
   pointer-events: none;
 }
@@ -194,6 +222,7 @@ button:disabled {
   background: var(--panel-3);
   border: 1px solid var(--border-strong);
   border-radius: 999px;
+  box-shadow: inset 0 2px 3px rgba(17, 17, 17, 0.08);
   transition: background var(--t-med), border-color var(--t-med);
 }
 
@@ -205,7 +234,8 @@ button:disabled {
   height: 16px;
   border-radius: 50%;
   background: var(--muted);
-  transition: transform var(--t-med), background var(--t-med);
+  box-shadow: 0 1px 2px rgba(17, 17, 17, 0.25);
+  transition: transform var(--t-spring), background var(--t-med);
 }
 
 .switch input:checked + .track {
@@ -243,7 +273,7 @@ button:disabled {
   font-family: var(--font-mono);
 }
 
-/* 键帽：全站签名元素——真实按键的立体质感 */
+/* 键帽：全站签名元素——仪器面板上的实体按键 */
 kbd {
   display: inline-flex;
   align-items: center;
@@ -252,9 +282,9 @@ kbd {
   padding: 2.5px 6px;
   border: 1px solid var(--border-strong);
   border-bottom-width: 2px;
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--kbd-bg);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
@@ -262,26 +292,56 @@ kbd {
   line-height: 1.3;
 }
 
-/* 卡片 */
+/* 卡片：纸面浮起 */
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
+  box-shadow: 0 1.5px 0 var(--edge), 0 2px 6px rgba(17, 17, 17, 0.05);
 }
 
-/* ---------- Toast ---------- */
+/* ---------- 骨架屏（加载表现） ----------
+   .skel 内放灰阶长条，shimmer 流光从左向右扫过（纯中性高光，无色相） */
+.skel {
+  position: relative;
+  overflow: hidden;
+  background: var(--panel-2);
+  border-radius: 6px;
+}
+
+.skel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0,
+    rgba(255, 255, 255, 0.45) 50%,
+    transparent 100%
+  );
+  animation: skel-shimmer 1.4s var(--ease) infinite;
+}
+
+@keyframes skel-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* ---------- Toast：黑键通知条 ---------- */
 
 .toast {
   position: fixed;
   left: 50%;
   bottom: 40px;
   transform: translateX(-50%);
-  background: var(--panel-3);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
+  background: var(--brand-btn);
+  border: 1px solid var(--edge-strong);
+  color: var(--on-brand);
   padding: 9px 18px;
-  border-radius: var(--r-sm);
-  box-shadow: var(--shadow-2);
+  border-radius: var(--r-key);
+  box-shadow: var(--shadow-brand);
   font-size: 13px;
   display: flex;
   align-items: center;
@@ -290,7 +350,7 @@ kbd {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: opacity 150ms ease, transform 150ms ease;
+  transition: opacity 150ms ease, transform 150ms var(--ease-spring);
 }
 
 @starting-style {
@@ -319,7 +379,7 @@ kbd {
 }
 
 .toast.ok {
-  border-color: var(--border-strong);
+  border-color: var(--edge-strong);
 }
 
 /* ---------- 滚动条 ---------- */
@@ -362,6 +422,30 @@ kbd {
   animation: fade-up 240ms var(--ease);
 }
 
+/* 列表 stagger 入场：配合内联 --i（行序号）使用
+   animation: list-in 260ms var(--ease) both; animation-delay: calc(var(--i) * var(--stagger)) */
+@keyframes list-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 空态呼吸：克制的透明度脉动 */
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* ---------- 可访问性：reduced-motion（更温和，不是零） ---------- */
 
 @media (prefers-reduced-motion: reduce) {
@@ -375,14 +459,29 @@ kbd {
     }
   }
 
+  @keyframes list-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
   *,
   *::before,
   *::after {
     transition-duration: 80ms !important;
+    animation-duration: 80ms !important;
   }
 
-  /* 无限旋转动画（同步进行中的图标）直接停用：旋转没有可「更温和」的
-     中间态，静态图标仍能表达加载中（评审 M13） */
+  /* 无限循环动画（shimmer/呼吸/旋转图标）直接停用：
+     静态呈现仍能表达加载中与空态（评审 M13） */
+  .skel::after,
+  .breathe {
+    animation: none !important;
+  }
+
   .spin {
     animation: none !important;
   }
@@ -395,9 +494,9 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-/* 品牌名/标题 display 处理：衬线声部，纸面编辑气质 */
+/* 品牌名/标题 display 处理：丝印声部——等宽、加宽字距，仪器铭牌 */
 .display {
   font-family: var(--font-display);
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.08em;
 }
