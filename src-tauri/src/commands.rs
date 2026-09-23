@@ -382,17 +382,21 @@ fn load_image_rgba(app: &AppHandle, id: &str) -> Result<image::RgbaImage, String
         .to_rgba8())
 }
 
-/// 把 RGBA 写入系统剪贴板
+/// 把 RGBA 写入系统剪贴板：走 paste::with_retry 短重试（Win32
+/// SetClipboardData 对截图工具等的毫秒级剪贴板独占极其敏感）
 fn set_clipboard_image(rgba: &image::RgbaImage) -> Result<(), String> {
-    arboard::Clipboard::new()
-        .and_then(|mut c| {
-            c.set_image(arboard::ImageData {
-                width: rgba.width() as usize,
-                height: rgba.height() as usize,
-                bytes: std::borrow::Cow::Borrowed(rgba.as_raw()),
+    crate::paste::with_retry(|| {
+        arboard::Clipboard::new()
+            .and_then(|mut c| {
+                c.set_image(arboard::ImageData {
+                    width: rgba.width() as usize,
+                    height: rgba.height() as usize,
+                    bytes: std::borrow::Cow::Borrowed(rgba.as_raw()),
+                })
             })
-        })
-        .map_err(|e| format!("写入图片剪贴板失败: {e}"))
+            .map_err(|e| e.to_string())
+    })
+    .map_err(|e| format!("写入图片剪贴板失败（剪贴板可能被其他程序短暂占用，已自动重试）：{e}"))
 }
 
 #[tauri::command]

@@ -170,10 +170,38 @@ pub mod foreground {
 const PASTE_INJECTED_ERR: &str =
     "粘贴失败：目标窗口拒绝模拟按键（该应用可能以管理员权限运行）。请以相同权限重启本应用后重试";
 
+/// Win32 剪贴板写入对瞬时竞争敏感：截图工具/输入法/剪贴板管理器会短暂
+/// 独占剪贴板（OpenClipboard/SetClipboardData 毫秒级失败）。单次尝试会把
+/// 这类瞬态失败直接抛给用户（实测「写入图片剪贴板失败: Unknown error …
+/// SetClipboardData」），短重试消化之；仍失败才上报。
+const WRITE_TRIES: usize = 5;
+const WRITE_RETRY_DELAY: Duration = Duration::from_millis(30);
+
+/// 剪贴板写入短重试：闭包返回 Err(String)（原始错误文本）时重试，
+/// 耗尽后返回最后一次的原始错误，由调用方附上前缀与用户提示。
+pub(crate) fn with_retry<T>(mut write: impl FnMut() -> Result<T, String>) -> Result<T, String> {
+    let mut last = String::new();
+    for attempt in 0..WRITE_TRIES {
+        match write() {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                last = e;
+                if attempt + 1 < WRITE_TRIES {
+                    std::thread::sleep(WRITE_RETRY_DELAY);
+                }
+            }
+        }
+    }
+    Err(last)
+}
+
 pub fn set_clipboard_text(text: &str) -> Result<(), String> {
-    arboard::Clipboard::new()
-        .and_then(|mut c| c.set_text(text.to_string()))
-        .map_err(|e| format!("写入剪贴板失败: {e}"))
+    with_retry(|| {
+        arboard::Clipboard::new()
+            .and_then(|mut c| c.set_text(text.to_string()))
+            .map_err(|e| e.to_string())
+    })
+    .map_err(|e| format!("写入剪贴板失败（剪贴板可能被其他程序短暂占用，已自动重试）：{e}"))
 }
 
 pub fn get_clipboard_text() -> Option<String> {
@@ -302,6 +330,35 @@ mod tests {
             err.contains("管理员"),
             "错误信息须给出用户可操作提示: {err}"
         );
+    }
+
+    // 剪贴板瞬时独占（截图工具等）会让 SetClipboardData 毫秒级失败：
+    // 重试助手必须消化瞬态错误，耗尽后才返回最后一次的原始错误
+    #[test]
+    fn with_retry_succeeds_after_transient_failures() {
+        let mut calls = 0;
+        let result: Result<u32, String> = with_retry(|| {
+            calls += 1;
+            if calls < 3 {
+                Err("SetClipboardData failed".into())
+            } else {
+                Ok(7)
+            }
+        });
+        assert_eq!(result.unwrap(), 7);
+        assert_eq!(calls, 3);
+    }
+
+    #[test]
+    fn with_retry_returns_last_error_when_exhausted() {
+        let mut calls = 0;
+        let result: Result<(), String> = with_retry(|| {
+            calls += 1;
+            Err(format!("fail #{calls}"))
+        });
+        let err = result.expect_err("始终失败时必须返回错误");
+        assert_eq!(err, format!("fail #{WRITE_TRIES}"), "须返回最后一次的原始错误");
+        assert_eq!(calls, WRITE_TRIES);
     }
 }
 
