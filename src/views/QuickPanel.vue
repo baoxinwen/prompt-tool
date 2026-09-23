@@ -475,7 +475,6 @@ onBeforeUnmount(() => {
             <span class="item-meta">
               <KeyCap v-if="p.hotkey" :combo="p.hotkey" />
               <CategoryBadge v-if="p.category" :name="p.category" mode="badge" />
-              <span v-if="p.useCount" class="count tnum">{{ p.useCount }} 次</span>
             </span>
           </div>
           <div class="item-preview" :class="{ two: i === active }">
@@ -920,16 +919,6 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   flex: none;
-}
-
-.count {
-  font-size: 11px;
-  color: var(--faint);
-}
-
-/* 黑键行内的计数：反白刻字 */
-.item.active .count {
-  color: color-mix(in srgb, var(--on-brand) 65%, transparent);
 }
 
 /* 预览统一两行截断（与主窗口剪贴板页 .content 同族）；.two 仅表示 active

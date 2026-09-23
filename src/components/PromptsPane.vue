@@ -653,10 +653,11 @@ function fmtTime(ts: number) {
               <span class="grow" />
               <CategoryBadge v-if="p.category" :name="p.category" mode="badge" />
             </div>
-            <!-- meta 行：无快捷键/次数/变量时整行不渲染，行高更紧凑 -->
-            <div v-if="p.hotkey || p.useCount || manualVarCount(p.content)" class="pitem-row">
+            <!-- meta 行：无快捷键/变量时整行不渲染，行高更紧凑。
+                 使用次数不上屏：列表已按最近使用排序、编辑器 d-meta 有带
+                 上下文的完整统计，行内孤立数字无决策价值（用户反馈） -->
+            <div v-if="p.hotkey || manualVarCount(p.content)" class="pitem-row">
               <KeyCap v-if="p.hotkey" :combo="p.hotkey" />
-              <span v-if="p.useCount" class="use-n tnum">{{ p.useCount }} 次</span>
               <span v-if="manualVarCount(p.content)" class="var-n tnum">{{ manualVarCount(p.content) }} 个变量</span>
             </div>
             <div class="pitem-preview">
@@ -1101,26 +1102,12 @@ function fmtTime(ts: number) {
   margin-top: 4px;
 }
 
-/* 次要信息（快捷键/次数/变量数）：右对齐尾部一行，纯等宽文字不加盒——
-   盒子是「三数据堆积」臃肿感的来源，徽章是行内唯一的框 */
-.use-n {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted);
-}
-
-/* 「N 个变量」计数：与次数同行的安静等宽文字（守卫测试依赖文本存在），
-   中点分隔，无 chip 盒 */
+/* 次要信息（快捷键/变量数）：右对齐尾部一行，纯等宽文字不加盒——
+   徽章是行内唯一的框 */
 .var-n {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--muted);
-}
-
-.var-n::before {
-  content: '·';
-  margin: 0 5px 0 1px;
-  color: var(--faint);
 }
 
 .pitem-preview {
