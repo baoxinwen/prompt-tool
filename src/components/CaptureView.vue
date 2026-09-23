@@ -169,7 +169,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border-strong);
   /* 圆角对齐 Win11 对无框窗口的 DWM 圆角（8px），画布同色见 base.css
      body[data-window]——与快捷面板 .qp 同款，避免角落双曲线与异色楔形 */
-  border-radius: var(--r-sm);
+  border-radius: var(--r-shell);
   overflow: hidden;
   gap: 9px;
 }
@@ -201,12 +201,15 @@ onBeforeUnmount(() => {
   flex: 1;
 }
 
+/* 关闭钮：非实体键——清除透明底上的键帽光影伪影与位移 */
 .icon-x {
   width: 26px;
   height: 26px;
   padding: 0;
   border-color: transparent;
   background: transparent;
+  box-shadow: none;
+  transform: none;
   color: var(--muted);
 }
 
@@ -224,7 +227,8 @@ onBeforeUnmount(() => {
   line-height: 1.6;
   white-space: pre-wrap;
   margin: 0 12px;
-  background: var(--bg-soft);
+  /* 正文大井：与其他输入控件同一凹槽井面色 */
+  background: var(--input-bg);
 }
 
 .cv-foot {
@@ -273,6 +277,8 @@ select {
 
 .ghost-btn {
   background: transparent;
+  border-color: transparent;
+  box-shadow: none;
   font-size: 12px;
   color: var(--muted);
 }
@@ -288,5 +294,8 @@ select {
 
 .ghost-btn:hover {
   color: var(--text);
+  background: var(--panel-2);
+  border-color: var(--border);
+  transform: none;
 }
 </style>

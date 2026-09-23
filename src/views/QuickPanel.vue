@@ -594,7 +594,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border-strong);
   /* 圆角对齐 Win11 对无框窗口的 DWM 圆角（8px）：外圈（系统）与内圈（边框）
      曲率一致，避免角落出现双曲线与异色楔形；画布同色见 base.css body[data-window] */
-  border-radius: var(--r-sm);
+  border-radius: var(--r-shell);
   overflow: hidden;
   box-shadow: var(--shadow-2);
 }
@@ -608,6 +608,7 @@ onBeforeUnmount(() => {
   flex: none;
 }
 
+/* 命令栏：凹槽井——内阴影下压，聚焦换黑键环 */
 .cmd {
   flex: 1;
   min-width: 0;
@@ -619,21 +620,24 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   height: 42px;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
   transition: border-color var(--t-med), box-shadow var(--t-med);
 }
 
 .cmd:focus-within {
   border-color: transparent;
-  box-shadow: var(--glow);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05), var(--glow);
 }
 
 .cmd-ico {
   color: var(--faint);
   flex: none;
+  transition: transform var(--t-spring), color var(--t-med);
 }
 
 .cmd:focus-within .cmd-ico {
   color: var(--brand);
+  transform: scale(1.12);
 }
 
 .qp-search {
@@ -657,6 +661,7 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
+/* 透明图标键：脱离全局实体键三态 */
 .icon-btn {
   width: 34px;
   height: 34px;
@@ -665,12 +670,15 @@ onBeforeUnmount(() => {
   color: var(--muted);
   border-color: transparent;
   background: transparent;
+  box-shadow: none;
   flex: none;
 }
 
 .icon-btn:hover {
   background: var(--panel-2);
   color: var(--text);
+  border-color: transparent;
+  transform: none;
 }
 
 .qp-chips {
@@ -686,6 +694,7 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
+/* 实体键 chips：静止平放，hover 上浮 1px + 底边变实 */
 .chip {
   padding: 4px 12px;
   border-radius: 999px;
@@ -693,8 +702,11 @@ onBeforeUnmount(() => {
   color: var(--muted);
   background: transparent;
   border: 1px solid var(--border);
+  box-shadow: none;
   flex: none;
   gap: 6px;
+  transition: transform var(--t-spring), background var(--t-fast), color var(--t-fast),
+    border-color var(--t-fast), box-shadow var(--t-fast);
 }
 
 .chip-dot {
@@ -707,12 +719,28 @@ onBeforeUnmount(() => {
 .chip:hover {
   color: var(--text);
   background: var(--panel-2);
+  border-color: var(--border-strong);
+  box-shadow: 0 1.5px 0 var(--edge), 0 2px 5px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
 }
 
+.chip:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.14);
+}
+
+/* 激活 = 按住的黑键 */
 .chip.on {
-  background: var(--brand-soft-2);
-  border-color: var(--brand);
-  color: var(--text);
+  background: var(--brand-btn);
+  border-color: var(--edge-strong);
+  color: var(--on-brand);
+  transform: none;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.3);
+}
+
+.chip.on:active {
+  transform: none;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.35);
 }
 
 .qp-list {
@@ -767,7 +795,9 @@ onBeforeUnmount(() => {
   border-radius: var(--r-sm);
   cursor: pointer;
   overflow: hidden;
-  transition: background var(--t-fast);
+  /* 选中 = 按住的黑键：纯色彩过渡，不动 transform */
+  transition: background 160ms var(--ease), color 160ms var(--ease),
+    box-shadow 160ms var(--ease);
 }
 
 .item:hover {
@@ -775,7 +805,9 @@ onBeforeUnmount(() => {
 }
 
 .item.active {
-  background: var(--brand-soft);
+  background: var(--brand-btn);
+  color: var(--on-brand);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.3);
 }
 
 .item.active::before {
@@ -786,12 +818,56 @@ onBeforeUnmount(() => {
   bottom: 8px;
   width: 2.5px;
   border-radius: 3px;
-  background: var(--brand);
+  background: var(--on-brand);
+}
+
+/* stagger 入场：逐条上浮（--stagger 步进，第 8 条起 280ms 封顶） */
+.qp-list .item {
+  animation: list-in 260ms var(--ease) both;
+  animation-delay: calc(var(--stagger) * 7);
+}
+
+.qp-list .item:nth-child(1) {
+  animation-delay: calc(var(--stagger) * 0);
+}
+
+.qp-list .item:nth-child(2) {
+  animation-delay: calc(var(--stagger) * 1);
+}
+
+.qp-list .item:nth-child(3) {
+  animation-delay: calc(var(--stagger) * 2);
+}
+
+.qp-list .item:nth-child(4) {
+  animation-delay: calc(var(--stagger) * 3);
+}
+
+.qp-list .item:nth-child(5) {
+  animation-delay: calc(var(--stagger) * 4);
+}
+
+.qp-list .item:nth-child(6) {
+  animation-delay: calc(var(--stagger) * 5);
+}
+
+.qp-list .item:nth-child(7) {
+  animation-delay: calc(var(--stagger) * 6);
+}
+
+.qp-list .item:nth-child(8) {
+  animation-delay: calc(var(--stagger) * 7);
 }
 
 .hl {
   color: var(--brand);
   font-weight: 700;
+}
+
+/* 黑键行内的高亮：反白 + 下划线保持可读 */
+.item.active .hl {
+  color: var(--on-brand);
+  text-decoration: underline;
 }
 
 .item-line {
@@ -818,6 +894,11 @@ onBeforeUnmount(() => {
   flex: none;
 }
 
+/* 黑键行内的图钉记号统一反白（琥珀在黑/白键面上对比不足） */
+.item.active .pin {
+  color: var(--on-brand);
+}
+
 .item-meta {
   display: inline-flex;
   align-items: center;
@@ -828,6 +909,10 @@ onBeforeUnmount(() => {
 .count {
   font-size: 11px;
   color: var(--faint);
+}
+
+.item.active .count {
+  color: color-mix(in srgb, var(--on-brand) 65%, transparent);
 }
 
 /* 预览统一两行截断（与主窗口剪贴板页 .content 同族）；.two 仅表示 active
@@ -844,26 +929,42 @@ onBeforeUnmount(() => {
   word-break: break-word;
 }
 
-/* {{变量}} chip：琥珀记号色（--var），两视图同族 */
+/* 黑键行内的预览/时间等次级文字：反白刻字 */
+.item.active .item-preview,
+.item.active .faint {
+  color: color-mix(in srgb, var(--on-brand) 72%, transparent);
+}
+
+/* {{变量}} chip：凹井里的刻痕（--var 石墨刻字），两视图同族 */
 .var-chip {
   display: inline-block;
   max-width: 100%;
   padding: 0 5px;
   margin: 0 1px;
   border-radius: var(--r-xs);
-  background: color-mix(in srgb, var(--var) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--var) 28%, transparent);
+  background: color-mix(in srgb, var(--var) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--var) 22%, transparent);
   color: var(--var);
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
 }
 
-/* 剪贴板时间分组头（与主窗口 ClipboardPane .grp 同族） */
+/* 黑键行内的变量刻痕：换反白凹印，保可读 */
+.item.active .var-chip {
+  background: color-mix(in srgb, var(--on-brand) 8%, transparent);
+  border-color: color-mix(in srgb, var(--on-brand) 24%, transparent);
+  color: color-mix(in srgb, var(--on-brand) 85%, transparent);
+}
+
+/* 剪贴板时间分组头：丝印小铭牌（与主窗口 ClipboardPane .grp 同族） */
 .grp {
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
   font-weight: 600;
   color: var(--faint);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   padding: 10px 4px 0;
 }
 
@@ -878,6 +979,13 @@ onBeforeUnmount(() => {
   color: var(--faint);
   background: var(--panel-2);
   border: 1px solid var(--border);
+}
+
+/* 黑键行内的类型图标：反白成键面上的小键 */
+.item.active .kind-ico {
+  background: var(--on-brand);
+  color: var(--brand-btn);
+  border-color: transparent;
 }
 
 .item-img {

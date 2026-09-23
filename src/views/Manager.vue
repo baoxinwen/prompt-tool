@@ -299,9 +299,20 @@ const tabs = [
         </div>
       </aside>
 
-      <!-- 内容区 -->
+      <!-- 内容区：首帧数据未就绪时先亮骨架屏（本地读取通常 <50ms，仅开机后
+           首次开窗可见），就绪后切真实面板 -->
       <main class="mg-main">
-        <PromptsPane v-if="tab === 'prompts'" />
+        <div v-if="!data" class="mg-skel" aria-hidden="true">
+          <div class="mg-skel-col">
+            <div class="skel skel-t"></div>
+            <div class="skel skel-row" v-for="i in 6" :key="i"></div>
+          </div>
+          <div class="mg-skel-col grow">
+            <div class="skel skel-title"></div>
+            <div class="skel skel-body"></div>
+          </div>
+        </div>
+        <PromptsPane v-else-if="tab === 'prompts'" />
         <ClipboardPane v-else-if="tab === 'clipboard'" />
         <SyncPane v-else-if="tab === 'sync'" />
         <DataPane v-else-if="tab === 'data'" />
@@ -359,10 +370,11 @@ const tabs = [
   user-select: none;
 }
 
+/* 丝印铭牌：等宽加宽字距的仪器名牌 */
 .tb-name {
   font-family: var(--font-display);
-  font-size: 12px;
-  letter-spacing: 0.03em;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
   color: var(--muted);
 }
 
@@ -371,6 +383,7 @@ const tabs = [
   gap: 2px;
 }
 
+/* 窗口控制：平面透明键，脱离全局实体键三态 */
 .tb-btn {
   width: 40px;
   height: 26px;
@@ -380,11 +393,15 @@ const tabs = [
   background: transparent;
   border-radius: var(--r-xs);
   color: var(--muted);
+  box-shadow: none;
 }
 
 .tb-btn:hover {
   background: var(--panel-2);
   color: var(--text);
+  border-color: transparent;
+  transform: none;
+  box-shadow: none;
 }
 
 .tb-close:hover {
@@ -412,16 +429,24 @@ const tabs = [
   gap: 6px;
 }
 
+/* 品牌标：浮起的黑键（亮色石墨黑 / 暗色反白键），hover 微亮 */
 .brand-mark {
   width: 34px;
   height: 34px;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-key);
+  border: 1px solid var(--edge-strong);
   display: grid;
   place-items: center;
   background: var(--brand-btn);
   color: var(--on-brand);
+  box-shadow: var(--shadow-brand);
   margin-bottom: 14px;
   flex: none;
+  transition: background var(--t-fast);
+}
+
+.brand-mark:hover {
+  background: var(--brand-btn-hover);
 }
 
 .mg-nav {
@@ -430,6 +455,7 @@ const tabs = [
   gap: 4px;
 }
 
+/* 透明键：hover 换面色 + 图标弹性放大，本体不位移 */
 .nav-btn {
   position: relative;
   width: 40px;
@@ -439,16 +465,39 @@ const tabs = [
   background: transparent;
   border-radius: var(--r-sm);
   color: var(--muted);
+  box-shadow: none;
+  transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
 }
 
 .nav-btn:hover {
   background: var(--panel-2);
   color: var(--text);
+  border-color: transparent;
+  transform: none;
+  box-shadow: none;
 }
 
+.nav-btn svg {
+  transition: transform var(--t-spring);
+}
+
+.nav-btn:hover svg {
+  transform: scale(1.08);
+}
+
+.nav-btn:active {
+  box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.14);
+}
+
+/* 激活 = 按住的黑键：内陷 + 反白，左标条同键色 */
 .nav-btn.on {
-  background: var(--brand-soft);
-  color: var(--brand);
+  background: var(--brand-btn);
+  color: var(--on-brand);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--edge-strong);
+}
+
+.nav-btn.on:active {
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.35), 0 0 0 1px var(--edge-strong);
 }
 
 .nav-btn.on::before {
@@ -459,7 +508,7 @@ const tabs = [
   bottom: 9px;
   width: 3px;
   border-radius: 3px;
-  background: var(--brand);
+  background: var(--brand-btn);
 }
 
 .side-foot {
@@ -490,6 +539,51 @@ const tabs = [
   flex-direction: column;
 }
 
+/* 首帧骨架屏：列表列（标题条 + 6 行）+ 编辑器列（标题 + 正文块），
+   行高节奏对齐真实面板，shimmer 见 base.css .skel */
+.mg-skel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+  padding: 16px 18px;
+}
+
+.mg-skel-col {
+  width: 320px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mg-skel-col.grow {
+  width: auto;
+  flex: 1;
+  padding: 2px 4px;
+}
+
+.skel-t {
+  height: 20px;
+  width: 40%;
+  margin-bottom: 4px;
+}
+
+.skel-row {
+  height: 52px;
+}
+
+.skel-title {
+  height: 24px;
+  width: 55%;
+  margin-bottom: 6px;
+}
+
+.skel-body {
+  flex: 1;
+  min-height: 200px;
+}
+
 /* toast 靠右下，避开编辑器底部操作区 */
 .mg .toast {
   left: auto;
@@ -505,14 +599,24 @@ const tabs = [
   }
 }
 
+/* toast 内的动作键：黑键面上的反白胶囊（覆盖全局 button 实体键） */
 .toast-action {
   margin-left: 10px;
   padding: 2px 12px;
   font-size: 12px;
   font-weight: 600;
   border-radius: 999px;
-  background: var(--brand-soft);
+  background: transparent;
   border-color: transparent;
-  color: var(--brand);
+  color: var(--on-brand);
+  box-shadow: none;
+}
+
+.toast-action:hover {
+  background: color-mix(in srgb, var(--on-brand) 12%, transparent);
+  border-color: transparent;
+  color: var(--on-brand);
+  transform: none;
+  box-shadow: none;
 }
 </style>

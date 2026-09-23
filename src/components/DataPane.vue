@@ -225,7 +225,7 @@ onBeforeUnmount(() => {
 .dz-mark {
   font-size: 13px;
   color: var(--faint);
-  letter-spacing: 1px;
+  letter-spacing: 0.08em;
   user-select: none;
 }
 
@@ -257,7 +257,7 @@ onBeforeUnmount(() => {
   line-height: 1.6;
   color: var(--ok);
   background: var(--ok-soft);
-  border: 1px solid rgba(130, 169, 107, 0.4);
+  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
   border-radius: 999px;
   padding: 3px 14px;
 }
@@ -281,13 +281,17 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+/* 卡片分区标题：丝印等宽铭牌 */
 .ex-head h3 {
-  font-size: 14px;
-  font-weight: 650;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--faint);
 }
 
 .ex-ico {
-  color: var(--ok);
+  color: var(--brand);
 }
 
 .ex-desc {

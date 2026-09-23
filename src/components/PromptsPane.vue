@@ -838,13 +838,16 @@ function fmtTime(ts: number) {
   letter-spacing: normal;
 }
 
+/* 计数位：丝印小 chip（等宽 + 加宽字距，仪器铭牌） */
 .pp-count {
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
   color: var(--faint);
   background: var(--panel-2);
   border: 1px solid var(--border);
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--r-xs);
 }
 
 .search-box {
@@ -866,6 +869,7 @@ function fmtTime(ts: number) {
   width: 230px;
 }
 
+/* Ctrl K 提示：迷你键帽——背景/边框交给全局 kbd 实体键，这里只收字号 */
 .search-hint {
   position: absolute;
   right: 7px;
@@ -873,7 +877,6 @@ function fmtTime(ts: number) {
   padding: 2px 5px;
   pointer-events: none;
   color: var(--faint);
-  background: var(--panel-2);
   transition: opacity var(--t-fast);
 }
 
@@ -908,33 +911,52 @@ function fmtTime(ts: number) {
   flex: none;
 }
 
+/* 分类 chip：实体键（键身物理交给全局 button，这里定键形/配色） */
 .chip {
   padding: 3.5px 10px;
-  border-radius: 999px;
+  border-radius: var(--r-key);
   font-size: 12px;
   color: var(--muted);
   background: var(--panel);
   gap: 6px;
+  transition: transform var(--t-spring), background var(--t-fast), border-color var(--t-fast),
+    box-shadow var(--t-spring), color var(--t-fast);
 }
 
 .chip:hover {
   background: var(--panel-2);
   border-color: var(--border-strong);
+  transform: translateY(-1px);
 }
 
 .chip-n {
+  font-family: var(--font-mono);
   font-size: 10px;
   color: var(--faint);
 }
 
+/* 选中分类 = 按住的黑键：浮起键按下即选中，不再位移 */
 .chip.on {
-  background: var(--brand-soft-2);
-  border-color: var(--brand);
-  color: var(--text);
+  background: var(--brand-btn);
+  border-color: var(--edge-strong);
+  color: var(--on-brand);
+  box-shadow: var(--shadow-brand);
+  transform: none;
 }
 
 .chip.on .chip-n {
-  color: var(--brand);
+  color: var(--on-brand);
+  opacity: 0.72;
+}
+
+.chip.on .chip-ops {
+  color: var(--on-brand);
+  opacity: 0.72;
+}
+
+.chip.on .chip-ops svg:hover {
+  color: var(--on-brand);
+  opacity: 1;
 }
 
 .chip-dot {
@@ -979,21 +1001,59 @@ function fmtTime(ts: number) {
   gap: 2px;
 }
 
+/* 列表行 stagger 入场：40ms 步进，第 8 行起封顶 280ms（keyframes 复用全局 list-in） */
+.list-scroll .pitem {
+  animation: list-in 260ms var(--ease) both;
+}
+
+.list-scroll .pitem:nth-child(2) {
+  animation-delay: calc(var(--stagger) * 1);
+}
+
+.list-scroll .pitem:nth-child(3) {
+  animation-delay: calc(var(--stagger) * 2);
+}
+
+.list-scroll .pitem:nth-child(4) {
+  animation-delay: calc(var(--stagger) * 3);
+}
+
+.list-scroll .pitem:nth-child(5) {
+  animation-delay: calc(var(--stagger) * 4);
+}
+
+.list-scroll .pitem:nth-child(6) {
+  animation-delay: calc(var(--stagger) * 5);
+}
+
+.list-scroll .pitem:nth-child(7) {
+  animation-delay: calc(var(--stagger) * 6);
+}
+
+.list-scroll .pitem:nth-child(8) {
+  animation-delay: calc(var(--stagger) * 7);
+}
+
+.list-scroll .pitem:nth-child(n + 9) {
+  animation-delay: calc(var(--stagger) * 7);
+}
+
 .pitem {
   position: relative;
   padding: 9px 11px;
   border-radius: var(--r-sm);
   cursor: pointer;
-  transition: background var(--t-fast);
+  transition: background var(--t-fast), box-shadow var(--t-fast);
 }
 
 .pitem:hover {
   background: var(--panel-2);
 }
 
+/* 选中行：按下感——描边 + 顶部内阴影 + 左侧黑标条（不做整行黑底） */
 .pitem.on {
   background: var(--panel);
-  box-shadow: inset 0 0 0 1px var(--border-strong);
+  box-shadow: inset 0 0 0 1px var(--border-strong), inset 0 2px 4px rgba(17, 17, 17, 0.06);
 }
 
 .pitem.on::before {
@@ -1002,8 +1062,8 @@ function fmtTime(ts: number) {
   left: 0;
   top: 8px;
   bottom: 8px;
-  width: 2.5px;
-  border-radius: 3px;
+  width: 3px;
+  border-radius: 2px;
   background: var(--brand);
 }
 
@@ -1045,15 +1105,16 @@ function fmtTime(ts: number) {
   color: var(--faint);
 }
 
-/* 「N 个变量」计数 chip：琥珀记号色（--var），与预览 var-mark 同族 */
+/* 「N 个变量」计数 chip：凹井刻痕族（--var 石墨刻字），与预览 var-mark 同族 */
 .var-n {
+  font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1.6;
   color: var(--var);
-  background: color-mix(in srgb, var(--var) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--var) 26%, transparent);
+  background: color-mix(in srgb, var(--var) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--var) 22%, transparent);
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--r-xs);
 }
 
 .pitem-preview {
@@ -1065,16 +1126,17 @@ function fmtTime(ts: number) {
   white-space: nowrap;
 }
 
-/* {{变量}} chip：琥珀记号色（--var），与 QuickPanel .var-chip 同族 */
+/* {{变量}} chip：凹井刻痕族（--var 石墨刻字），与 QuickPanel .var-chip 同族 */
 .var-mark {
   display: inline-block;
   max-width: 100%;
   padding: 0 5px;
   margin: 0 1px;
   border-radius: var(--r-xs);
-  background: color-mix(in srgb, var(--var) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--var) 28%, transparent);
+  background: color-mix(in srgb, var(--var) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--var) 22%, transparent);
   color: var(--var);
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -1119,10 +1181,12 @@ function fmtTime(ts: number) {
   gap: 8px;
 }
 
+/* 分类铭牌：丝印等宽小标签 */
 .d-cat {
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 0.5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   color: var(--muted);
 }
 
@@ -1132,7 +1196,7 @@ function fmtTime(ts: number) {
   gap: 5px;
   font-size: 12px;
   padding: 3.5px 10px;
-  border-radius: 999px;
+  border-radius: var(--r-key);
   color: var(--muted);
 }
 
@@ -1340,12 +1404,29 @@ function fmtTime(ts: number) {
   background: var(--ok-soft);
 }
 
+/* ghost 键：无阴影不上浮（悬停只换面/描边），按压留内陷反馈 */
 .ghost-btn {
   background: transparent;
   border-color: var(--border);
   color: var(--text-2);
   font-size: 13px;
   padding: 7px 14px;
+  box-shadow: none;
+  transform: none;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast),
+    box-shadow var(--t-fast);
+}
+
+.ghost-btn:hover {
+  background: var(--panel-2);
+  border-color: var(--border-strong);
+  transform: none;
+  box-shadow: none;
+}
+
+.ghost-btn:active {
+  transform: none;
+  box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.1);
 }
 
 /* 删除：红字描边恒定呈现（确认 + 撤销通知条行为不变） */

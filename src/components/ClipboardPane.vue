@@ -395,12 +395,13 @@ onBeforeUnmount(() => {
   padding: 2px 4px 2px;
 }
 
-/* 时间分组头 */
+/* 时间分组头：丝印等宽铭牌 */
 .grp {
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
   color: var(--faint);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.08em;
   padding: 10px 4px 0;
 }
 
@@ -425,14 +426,14 @@ onBeforeUnmount(() => {
   background: var(--panel-2);
 }
 
-/* 类型图标独立列 */
+/* 类型图标独立列：面板上的小键 */
 .kind-ico {
   flex: none;
   width: 22px;
   height: 22px;
   display: grid;
   place-items: center;
-  border-radius: var(--r-xs);
+  border-radius: var(--r-key);
   color: var(--faint);
   background: var(--panel-2);
   border: 1px solid var(--border);
@@ -488,9 +489,11 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
+/* 透明幽灵键：清除实体键光影（透明底上会残留高光/硬底边伪影），悬停不位移 */
 .ghost-btn {
   background: transparent;
   border-color: transparent;
+  box-shadow: none;
   color: var(--muted);
   font-size: 12px;
   padding: 4px 8px;
@@ -500,6 +503,7 @@ onBeforeUnmount(() => {
   color: var(--text);
   background: var(--panel-3);
   border-color: var(--border);
+  transform: none;
 }
 
 .ghost-btn.danger:hover {

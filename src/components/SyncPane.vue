@@ -518,7 +518,6 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 
 .on-badge.on .on-dot {
   background: var(--ok);
-  box-shadow: 0 0 6px var(--ok);
 }
 
 .sync-body {
@@ -563,7 +562,7 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 .ov-icon {
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   display: grid;
   place-items: center;
   background: var(--brand-soft);
@@ -712,6 +711,7 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
   padding-right: 34px;
 }
 
+/* 井内显隐钮：非实体键——清除键帽光影与位移，避免在凹槽井里浮起 */
 .pwd-box .eye {
   position: absolute;
   right: 4px;
@@ -720,6 +720,8 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
   padding: 0;
   border: none;
   background: transparent;
+  box-shadow: none;
+  transform: none;
   color: var(--muted);
 }
 

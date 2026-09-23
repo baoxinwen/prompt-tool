@@ -36,7 +36,7 @@ const color = computed(() => categoryColor(props.name));
   display: inline-flex;
   align-items: center;
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-xs);
   border: 1px solid;
   font-size: 11px;
   line-height: 1.6;

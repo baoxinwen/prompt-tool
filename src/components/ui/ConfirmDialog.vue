@@ -153,6 +153,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
   flex: 1;
 }
 
+/* 关闭键：ghost 物理——无阴影不上浮，悬停只换面 */
 .cd-x {
   width: 26px;
   height: 26px;
@@ -160,6 +161,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
   border-color: transparent;
   background: transparent;
   color: var(--muted);
+  box-shadow: none;
+  transform: none;
+}
+
+.cd-x:hover {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--text);
+  transform: none;
+  box-shadow: none;
 }
 
 .cd-msg {
@@ -185,19 +196,46 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
   opacity: 0.75;
 }
 
+/* 确认键：黑键（与全局 button.primary 同物理——浮起/悬停加亮/按压内陷） */
 .cd-confirm {
-  background: var(--panel-2);
+  background: linear-gradient(180deg, var(--brand-btn) 0%, var(--brand-strong) 100%);
+  border-color: var(--edge-strong);
+  color: var(--on-brand);
   font-weight: 600;
+  box-shadow: var(--shadow-brand);
 }
 
+.cd-confirm:hover {
+  background: linear-gradient(180deg, var(--brand-btn-hover) 0%, var(--brand-strong) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1.5px 0 var(--edge-strong),
+    0 4px 10px rgba(17, 17, 17, 0.24);
+}
+
+.cd-confirm:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.35), 0 0 0 var(--edge-strong);
+}
+
+/* 危险确认：走全局 danger 键语义——红字 + 悬停红染（实体键物理保留） */
 .cd-confirm.danger {
-  background: var(--danger-btn);
-  border-color: transparent;
-  color: #fff;
+  background: linear-gradient(180deg, var(--key-1) 0%, var(--key-2) 100%);
+  border-color: var(--border);
+  color: var(--danger);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1.5px 0 var(--edge),
+    0 2px 4px rgba(17, 17, 17, 0.06);
 }
 
 .cd-confirm.danger:hover {
-  background: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger-btn);
+  color: var(--danger);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1.5px 0 var(--edge-strong),
+    0 4px 10px rgba(17, 17, 17, 0.1);
+}
+
+.cd-confirm.danger:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.14), 0 0 0 var(--edge);
 }
 
 /* 过渡：200ms ease-out，scale 0.96 + opacity */

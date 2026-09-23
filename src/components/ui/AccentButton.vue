@@ -10,23 +10,28 @@ defineProps<{ disabled?: boolean }>();
 </template>
 
 <style scoped>
+/* 黑键三态：浮起（渐变墨面 + 实体投影）→ 悬停加亮上浮 → 按下下沉内陷 */
 .ab {
-  background: var(--brand-btn);
-  border: 1px solid transparent;
+  background: linear-gradient(180deg, var(--brand-btn) 0%, var(--brand-strong) 100%);
+  border: 1px solid var(--edge-strong);
   color: var(--on-brand);
   font-weight: 600;
   padding: 7px 18px;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-key);
   cursor: pointer;
-  transition: background var(--t-fast), transform var(--t-fast);
+  box-shadow: var(--shadow-brand);
+  transition: background var(--t-fast), transform var(--t-spring), box-shadow var(--t-spring);
 }
 
 .ab:hover {
-  background: var(--brand-btn-hover);
+  background: linear-gradient(180deg, var(--brand-btn-hover) 0%, var(--brand-strong) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1.5px 0 var(--edge-strong),
+    0 4px 10px rgba(17, 17, 17, 0.24);
 }
 
 .ab:active {
-  transform: scale(0.97);
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.35), 0 0 0 var(--edge-strong);
 }
 
 .ab:disabled {
@@ -34,6 +39,8 @@ defineProps<{ disabled?: boolean }>();
   background: var(--panel-2);
   color: var(--muted);
   border-color: var(--border);
+  box-shadow: none;
+  transform: none;
   cursor: default;
   pointer-events: none;
 }

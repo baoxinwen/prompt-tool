@@ -31,36 +31,46 @@ withDefaults(
   text-align: center;
 }
 
+/* 丝印等宽记号 */
 .empty-mark {
   font-size: 14px;
   color: var(--faint);
-  letter-spacing: 1px;
+  letter-spacing: 0.08em;
   opacity: 0.85;
   user-select: none;
 }
 
+/* 图标容器：克制的呼吸（keyframes 复用全局 breathe） */
 .empty-icon {
   width: 50px;
   height: 50px;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   display: grid;
   place-items: center;
   background: var(--panel-2);
   border: 1px dashed var(--border-strong);
   color: var(--brand);
   margin-bottom: 2px;
+  animation: breathe 2.6s var(--ease) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .empty-icon {
+    animation: none;
+  }
 }
 
 .empty-title {
   font-weight: 600;
   font-size: 14px;
+  letter-spacing: 0.01em;
 }
 
 .empty-desc {
   color: var(--muted);
   font-size: 13px;
-  max-width: 300px;
-  line-height: 1.6;
+  max-width: 320px;
+  line-height: 1.7;
 }
 
 .empty-action {

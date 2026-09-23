@@ -345,9 +345,13 @@ onMounted(() => {
   flex: none;
 }
 
+/* 分区标题：丝印等宽铭牌 */
 h3 {
-  font-size: 14px;
-  font-weight: 650;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--faint);
 }
 
 .opt {
@@ -411,39 +415,40 @@ h3 {
   gap: 6px;
 }
 
+/* 预览小样写死目标主题的中性面板色（墨夜石墨 / 纸面仪器），不随页面主题变化（M8.4） */
 .th-dark .th-preview {
-  background: #161511;
+  background: #141414;
 }
 
 .th-light .th-preview {
-  background: #f8f7f4;
+  background: #f4f4f4;
 }
 
 .th-auto .th-preview {
-  background: linear-gradient(105deg, #161511 50%, #f8f7f4 50%);
+  background: linear-gradient(105deg, #141414 50%, #f4f4f4 50%);
 }
 
-/* 主题预览条：写死目标主题的强调色，不随页面主题变化（M8.4） */
+/* 主题预览条：写死目标主题的强调色（黑键/白键），不随页面主题变化（M8.4） */
 .th-bar {
   width: 55%;
   height: 8px;
   border-radius: 4px;
-  background: #8b877a;
+  background: #999999;
 }
 
 .th-dark .th-bar {
-  background: #d8d3c4;
+  background: #e8e8e8;
 }
 
 .th-light .th-bar {
-  background: #201e19;
+  background: #1c1c1c;
 }
 
 .th-line {
   width: 85%;
   height: 6px;
   border-radius: 3px;
-  background: rgba(128, 128, 148, 0.35);
+  background: rgba(128, 128, 128, 0.35);
 }
 
 .th-line.short {

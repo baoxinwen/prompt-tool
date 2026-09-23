@@ -27,22 +27,27 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>();
 </template>
 
 <style scoped>
+/* 轨道：凹槽井（内阴影下压，与全局输入井同族） */
 .seg {
   display: inline-flex;
   gap: 2px;
   padding: 3px;
-  background: var(--bg-soft);
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
+/* 轨道内不做浮起键：拍平，选中项以「按住的键」表达 */
 .seg-item {
   border: none;
   background: transparent;
   padding: 5px 16px;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   color: var(--muted);
   font-size: 13px;
+  box-shadow: none;
+  transform: none;
   transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
 }
 
@@ -55,15 +60,11 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>();
   background: var(--panel-3);
   color: var(--text);
   font-weight: 600;
-  box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.08);
 }
 
 .seg.disabled {
   opacity: 0.55;
   pointer-events: none;
-}
-
-:root[data-theme='light'] .seg-item.on {
-  box-shadow: var(--shadow-1);
 }
 </style>
