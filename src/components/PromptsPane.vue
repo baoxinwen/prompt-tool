@@ -1049,7 +1049,7 @@ function fmtTime(ts: number) {
   background: var(--panel-2);
 }
 
-/* 选中行：按下感——凹面描边 + 顶部内阴影 + 深灰标条（反馈轮：选中不用黑） */
+/* 选中行：按下感——凹面描边 + 顶部内阴影 + 黑色标条（中间剂量：列表锚一根黑标条） */
 .pitem.on {
   background: var(--panel);
   box-shadow: inset 0 0 0 1px var(--border-strong), inset 0 2px 4px rgba(17, 17, 17, 0.06);
@@ -1063,7 +1063,7 @@ function fmtTime(ts: number) {
   bottom: 8px;
   width: 3px;
   border-radius: 2px;
-  background: var(--sel-bar);
+  background: var(--brand);
 }
 
 .pitem-title {
