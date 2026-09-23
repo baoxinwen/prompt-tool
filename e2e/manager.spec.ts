@@ -7,7 +7,8 @@ test.beforeEach(async ({ page }) => {
 
 test("管理窗口启动：提示词列表与详情可见", async ({ page }) => {
   await expect(page.locator(".pitem")).toHaveCount(3);
-  await expect(page.locator(".pp-head")).toContainText("3");
+  // 头部已不显示总数（与分类 chips 的「全部 N」重复），数据加载改由 chips 断言
+  await expect(page.locator(".cat-row")).toContainText("3");
   await page.screenshot({ path: "e2e-artifacts/manager-home.png", fullPage: true });
 });
 

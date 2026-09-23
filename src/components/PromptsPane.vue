@@ -15,7 +15,7 @@ import {
 } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import { managerKey } from '../lib/context';
-import { hasVars, extractVars, isAutoVar, applyVars, applyClipboardVar, clipboardVarRe, VAR_RE } from '../lib/vars';
+import { extractVars, isAutoVar, applyVars, applyClipboardVar, clipboardVarRe, VAR_RE } from '../lib/vars';
 import { matchText, highlightSegs } from '../lib/search';
 import { previewSegments } from '../lib/preview';
 import { categoryColor } from '../lib/categoryColor';
@@ -29,7 +29,6 @@ import KeyCap from './ui/KeyCap.vue';
 
 const ctx = inject(managerKey)!;
 
-const varMark = '{{变量}}';
 /** 自动保存防抖：停止输入 900ms 后静默落盘 */
 const AUTO_SAVE_DELAY = 900;
 /** 「✓ 已自动保存」提示停留时长 */
@@ -572,7 +571,6 @@ function fmtTime(ts: number) {
     <header class="pp-head">
       <h2 class="pp-title">
         提示词
-        <span class="pp-count tnum">{{ allPrompts.length }}</span>
       </h2>
       <span class="grow" />
       <div class="search-box">
@@ -691,7 +689,6 @@ function fmtTime(ts: number) {
               <input v-model="draft.title" class="d-title" placeholder="提示词标题" @input="markDirty" />
               <div class="d-meta tnum">
                 使用 {{ draft.useCount }} 次 · 最近 {{ fmtTime(draft.lastUsedAt) }}
-                <template v-if="hasVars(draft.content)"> · <span class="mono">{{ varMark }}</span> 待填写</template>
               </div>
             </div>
           </div>
@@ -837,18 +834,6 @@ function fmtTime(ts: number) {
   font-size: var(--fs-lg);
   font-weight: 650;
   letter-spacing: normal;
-}
-
-/* 计数位：丝印小 chip（等宽 + 加宽字距，仪器铭牌） */
-.pp-count {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  color: var(--faint);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  padding: 1px 7px;
-  border-radius: var(--r-xs);
 }
 
 .search-box {

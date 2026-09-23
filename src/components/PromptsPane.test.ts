@@ -110,7 +110,9 @@ describe('PromptsPane：提示词管理', () => {
     const { wrapper } = await mountPane();
     expect(wrapper.findAll('.pitem').length).toBe(2);
     expect(wrapper.text()).toContain('从左侧选择提示词');
-    expect(wrapper.find('.pp-count').text()).toBe('2');
+    // 头部不再显示总数（与分类 chips 的「全部 N」重复），总数由 chips 承担
+    expect(wrapper.find('.pp-count').exists()).toBe(false);
+    expect(wrapper.text()).toContain('全部');
     wrapper.unmount();
   });
 
