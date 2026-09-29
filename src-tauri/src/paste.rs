@@ -208,6 +208,13 @@ pub fn get_clipboard_text() -> Option<String> {
     arboard::Clipboard::new().and_then(|mut c| c.get_text()).ok()
 }
 
+/// 恢复原剪贴板前的改写检测（评审 M8）：粘贴完成后约 300ms 处恢复时，若
+/// 用户已在目标应用手动复制新内容（当前剪贴板已不是本会话写入的文本），
+/// 不得恢复——否则覆盖用户刚复制的内容
+fn should_restore_clipboard(current: Option<&str>, written: &str) -> bool {
+    current.map_or(true, |cur| cur == written)
+}
+
 /// 恢复目标窗口焦点并模拟粘贴（可选追加回车）。
 /// Windows 下在发送前校验目标确实回到前台，失败重试一次，仍失败则放弃——
 /// 固定延时无法保证焦点切换成功，盲发会把内容粘进恰好在前台的其他应用。
@@ -273,10 +280,14 @@ pub fn paste_text<R: tauri::Runtime>(app: &tauri::AppHandle<R>, text: &str) -> R
 
     // 保存原剪贴板文本（原内容是图片等非文本时无法恢复，置 None）
     let original = if restore_clipboard { get_clipboard_text() } else { None };
+    let written = text.to_string();
 
-    // 写入失败必须解除抑制，否则剪贴板历史从此静默失效直到重启
+    // 写入失败必须解除抑制，否则剪贴板历史从此静默失效直到重启。
+    // 按代际解除（评审 I-9，对齐 copy_text 的 M6#7 范式）：失败瞬间可能已有
+    // 新会话推进代际，直接清标志会提前解除新会话的抑制，使其内容被误记
+    // 进剪贴板历史
     if let Err(e) = set_clipboard_text(text) {
-        crate::store::lock(app).suppress_clipboard = false;
+        crate::store::lock(app).release_suppress_if_current(generation);
         return Err(e);
     }
 
@@ -299,7 +310,15 @@ pub fn paste_text<R: tauri::Runtime>(app: &tauri::AppHandle<R>, text: &str) -> R
         // 本次粘贴/恢复动作吸收进基线，避免把程序写入的内容误记进历史
         std::thread::sleep(Duration::from_millis(300));
         if let Some(orig) = original.filter(|o| !o.is_empty()) {
-            let _ = arboard::Clipboard::new().and_then(|mut c| c.set_text(orig));
+            // 恢复前校验剪贴板仍为本会话写入的内容（评审 M8）：窗口期内用户
+            // 手动复制的新内容不得被覆盖；写入走短重试消化瞬态独占（评审 M7，
+            // 与 capture.rs 的恢复路径同口径）
+            let current = get_clipboard_text();
+            if should_restore_clipboard(current.as_deref(), &written) {
+                if let Err(e) = set_clipboard_text(&orig) {
+                    eprintln!("[prompt-tool] 恢复原剪贴板失败: {e}");
+                }
+            }
         }
         std::thread::sleep(crate::clipboard::SUPPRESS_WINDOW);
         crate::store::lock(&handle).release_suppress_if_current(generation);
@@ -359,6 +378,19 @@ mod tests {
         let err = result.expect_err("始终失败时必须返回错误");
         assert_eq!(err, format!("fail #{WRITE_TRIES}"), "须返回最后一次的原始错误");
         assert_eq!(calls, WRITE_TRIES);
+    }
+
+    // 评审 M8：粘贴收尾恢复原剪贴板前，若用户已在窗口期手动复制新内容
+    // （当前剪贴板 ≠ 本会话写入的文本），不得覆盖用户操作。代际计数只拦
+    // 程序自己的写入会话，拦不住用户手动 Ctrl+C
+    #[test]
+    fn should_restore_clipboard_truth_table() {
+        // 剪贴板仍是本会话写入的内容：恢复
+        assert!(should_restore_clipboard(Some("写入的提示词"), "写入的提示词"));
+        // 用户已改写（手动复制/他程序写入）：不恢复
+        assert!(!should_restore_clipboard(Some("用户复制的新内容"), "写入的提示词"));
+        // 读取失败（无法判定）：尽力而为恢复——这是「粘贴后恢复剪贴板」设置承诺的行为
+        assert!(should_restore_clipboard(None, "写入的提示词"));
     }
 }
 

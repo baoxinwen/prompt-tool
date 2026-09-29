@@ -20,6 +20,21 @@ pub const SUPPRESS_WINDOW: Duration = Duration::from_millis(POLL_INTERVAL_MS + 1
 
 const MAX_IMAGES: usize = 50;
 
+/// 单条文本记录的字节上限（评审 I-11）：超大复制（IDE 全选/日志工具输出
+/// 数 MB）会让 data.json 暴涨同等体量，其后每次全量序列化+fsync 的成本
+/// 线性放大。图片路径有尺寸/数量上限、变量记忆有 4000 字符上限，文本
+/// 此前无对应物。超限拒收（历史本就是「最近的」语义，非归档）
+pub const MAX_TEXT_RECORD_BYTES: usize = 1024 * 1024;
+
+/// 序号预检：序号可用且与上次相同 ⇒ 内容未变，跳过读取；序号不可用的
+/// 平台退回全量采样（始终探测）。抽成纯函数便于直接测试（评审 I-10）
+fn seq_needs_probe(current: Option<u32>, last: Option<u32>) -> bool {
+    match current {
+        Some(c) => last != Some(c),
+        None => true,
+    }
+}
+
 /// 剪贴板变化序列号：Win32 GetClipboardSequenceNumber 只在剪贴板内容
 /// 变化时递增，读取它无需打开剪贴板、不拷贝内容。纯图片剪贴板若每个
 /// 700ms 周期都全量 get_image（4K 图约 33MB），会持续消耗 CPU 与内存
@@ -65,17 +80,18 @@ pub fn spawn<R: Runtime + 'static>(app: AppHandle<R>) {
         loop {
             std::thread::sleep(POLL_INTERVAL);
 
-            // 序号未变 ⇒ 内容未变，跳过本周期全部读取（评审 I16）。
-            // 序号不可用的平台退回原全量采样行为
-            if let Some(seq) = clipboard_sequence() {
-                if last_seq == Some(seq) {
-                    continue;
-                }
-                last_seq = Some(seq);
+            // 序号预检（评审 I16）：序号未变 ⇒ 内容未变，跳过本周期全部读取。
+            // 序号只在读取成功后推进（评审 I-10）：序号是「已见内容」的标记，
+            // 读取失败（剪贴板被截图工具等进程毫秒级独占）的那次变化若提前
+            // 消费序号，该内容永久漏记——下周期序号未变直接跳过
+            let current_seq = clipboard_sequence();
+            if !seq_needs_probe(current_seq, last_seq) {
+                continue;
             }
 
             // 文本优先；剪贴板是图片时 get_text 会失败
             if let Ok(text) = board.get_text() {
+                last_seq = current_seq;
                 if text.is_empty() || last_text.as_deref() == Some(text.as_str()) {
                     continue;
                 }
@@ -87,6 +103,7 @@ pub fn spawn<R: Runtime + 'static>(app: AppHandle<R>) {
             }
 
             if let Ok(img) = board.get_image() {
+                last_seq = current_seq;
                 let hash = image_hash(img.width, img.height, &img.bytes);
                 if last_image == Some(hash) {
                     continue;
@@ -96,6 +113,7 @@ pub fn spawn<R: Runtime + 'static>(app: AppHandle<R>) {
                     let _ = app.emit("data-changed", ());
                 }
             }
+            // 两条读取都失败：不推进 last_seq，下个周期重试该变化
         }
     });
 }
@@ -109,6 +127,13 @@ fn should_record(suppress_clipboard: bool, capture_clipboard: bool) -> bool {
 /// 文本条目入库（去重后插到顶部 + 截断 + 落盘）。从 record_text 抽出：
 /// 抑制/开关快照在锁外完成，重活（落盘）与插入在同一临界区，逻辑可独立测试
 fn insert_text_record(store: &mut Store, text: String) -> bool {
+    if text.len() > MAX_TEXT_RECORD_BYTES {
+        eprintln!(
+            "[clipboard] 文本超 {} 字节上限，不入历史",
+            MAX_TEXT_RECORD_BYTES
+        );
+        return false;
+    }
     let now = now_ms();
     store.data.clipboard.retain(|i| i.content != text);
     store.data.clipboard.insert(
@@ -139,6 +164,11 @@ fn record_text<R: Runtime>(app: &AppHandle<R>, text: String) -> bool {
         return false;
     }
     let mut store = lock(app);
+    // 复检（评审 M9，对齐 record_image 的同款防线）：快照放锁后若被锁竞争
+    // 阻塞超过抑制窗口，期间粘贴会话已完整走完并解除抑制，迟到的文本不得入库
+    if !should_record(store.suppress_clipboard, store.data.settings.capture_clipboard) {
+        return false;
+    }
     insert_text_record(&mut store, text)
 }
 
@@ -264,5 +294,37 @@ mod tests {
         let mut store = Store::test_store(dir.path());
         assert!(insert_text_record(&mut store, "落盘".into()));
         assert!(dir.path().join("data.json").exists(), "入库必须落盘");
+    }
+
+    // 评审 I-11：单条文本此前无字节上限，一次超大复制（IDE 全选/日志工具）
+    // 会让 data.json 暴涨并在其后每次全量落盘时线性放大；数量上限（1000 条）
+    // 与字节上限是正交维度
+    #[test]
+    fn insert_text_record_rejects_oversized_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::test_store(dir.path());
+        let huge = "x".repeat(MAX_TEXT_RECORD_BYTES + 1);
+        assert!(!insert_text_record(&mut store, huge), "超上限文本必须拒收");
+        assert!(store.data.clipboard.is_empty(), "拒收不得入库");
+
+        // 恰好等于上限：可收（边界含等于）
+        let edge = "y".repeat(MAX_TEXT_RECORD_BYTES);
+        assert!(insert_text_record(&mut store, edge), "等于上限的文本应收录");
+        assert_eq!(store.data.clipboard.len(), 1);
+    }
+
+    // 评审 I-10：序号是「已见内容」的标记，不是「已见变化」——读取失败的那次
+    // 变化若提前消费序号，该内容永久漏记（下周期序号未变直接跳过）
+    #[test]
+    fn seq_needs_probe_truth_table() {
+        // 序号不变：跳过
+        assert!(!seq_needs_probe(Some(101), Some(101)));
+        // 序号前进：探测
+        assert!(seq_needs_probe(Some(102), Some(101)));
+        // 首次采样（last 为 None）：探测
+        assert!(seq_needs_probe(Some(101), None));
+        // 序号不可用的平台：退回全量采样，始终探测
+        assert!(seq_needs_probe(None, Some(101)));
+        assert!(seq_needs_probe(None, None));
     }
 }
