@@ -148,6 +148,21 @@ describe('UpdateSection', () => {
     expect(lastAutoUpdate.value).toBeNull(); // 一次性消费，避免复挂载时复活旧结果
   });
 
+  // 评审 I-15：停留在设置页时点「去更新」无响应——Manager.switchTab 对同页
+  // early return、组件不重挂载，仅靠 onMounted 消费 lastAutoUpdate 会漏掉
+  // 挂载后到达的自动检查结果。挂载后缓存到达也必须进入 available
+  it('挂载后 lastAutoUpdate 到达也进入 available（I-15）', async () => {
+    const w = mountSection();
+    await flushPromises();
+    expect(w.find('button.install').exists()).toBe(false);
+
+    lastAutoUpdate.value = { kind: 'available', version: '1.3.0', notes: '- 挂载后到达' };
+    await flushPromises();
+    expect(w.text()).toContain('1.3.0');
+    expect(w.find('button.install').exists()).toBe(true);
+    expect(lastAutoUpdate.value).toBeNull(); // 消费后清空
+  });
+
   it('安装失败：错误文案为「更新失败」而非「检查更新失败」', async () => {
     mockedApi.checkUpdate.mockResolvedValue({ kind: 'available', version: '1.1.0', notes: '' });
     mockedApi.onUpdateProgress.mockImplementation(async () => () => {});

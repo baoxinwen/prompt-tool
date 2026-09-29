@@ -220,6 +220,30 @@ describe('ClipboardPane：清空撤销', () => {
   });
 });
 
+describe('ClipboardPane：渐隐遮罩', () => {
+  // 评审 M18：内容增删/首次加载不触发 scroll 事件，fade 遮罩必须随数据
+  // 变化重算（QuickPanel 已修的同型问题）。happy-dom 无真实布局，
+  // 注入尺寸模拟「内容溢出」
+  it('列表溢出时随数据变化显示底部渐隐（M18）', async () => {
+    vi.useFakeTimers({ now: NOW });
+    const { wrapper, raw } = mountPane(makeData([]));
+    await flushPromises();
+    const el = wrapper.find('.list').element as HTMLElement;
+    Object.defineProperty(el, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(el, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(el, 'scrollTop', { value: 0, configurable: true });
+
+    raw.data.value = makeData(
+      Array.from({ length: 30 }, (_, i) => clipItem(`c${i}`, `内容${i}`)),
+    );
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0); // 放行 nextTick
+
+    expect(wrapper.find('.list').classes()).toContain('fade-bottom');
+    wrapper.unmount();
+  });
+});
+
 describe('ClipboardPane：全文浮层', () => {
   it('点击行打开全文浮层，Esc 关闭', async () => {
     vi.useFakeTimers({ now: NOW });

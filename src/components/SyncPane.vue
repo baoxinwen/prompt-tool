@@ -390,7 +390,7 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
             </label>
           </div>
           <p v-if="httpWarn()" class="muted hint warn-hint">
-            当前使用 http:// 连接，账号密码将以明文传输；如服务器支持，建议改用 https://
+            当前使用 http:// 连接，账号密码与同步数据都以明文传输，且同网段的窃听者可篡改同步内容（如注入提示词/删除条目）；如服务器支持，强烈建议改用 https://
           </p>
         </div>
 

@@ -1,4 +1,5 @@
 import { VAR_RE } from './vars';
+import { sliceUtf16Safe } from './search';
 
 /** 预览片段：chip 标记变量原子片段（不截断变量本身），cut 标记后面还有内容被截断 */
 export interface PreviewSeg { t: string; chip?: boolean; cut?: boolean }
@@ -19,7 +20,7 @@ export function previewSegments(text: string, max: number): PreviewSeg[] {
       if (used + plain.length <= max) { out.push({ t: plain }); used += plain.length; }
       else {
         const room = max - used;
-        if (room > 2) out.push({ t: plain.slice(0, room) });
+        if (room > 2) out.push({ t: sliceUtf16Safe(plain, room) });
         return cut();
       }
     }
@@ -36,7 +37,7 @@ export function previewSegments(text: string, max: number): PreviewSeg[] {
   if (used + tail.length <= max) out.push({ t: tail });
   else {
     const room = max - used;
-    if (room > 2) out.push({ t: tail.slice(0, room) });
+    if (room > 2) out.push({ t: sliceUtf16Safe(tail, room) });
     out.push({ t: '…', cut: true });
   }
   return out;

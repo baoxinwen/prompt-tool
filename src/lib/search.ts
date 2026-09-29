@@ -97,9 +97,24 @@ export function formatTime(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 
+/** 按 UTF-16 码元截断但不切碎代理对（评审 M21）：切点落在高位代理上时
+ *  回退一位，避免行尾渲染出 U+FFFD 乱码（全 emoji 内容可触发）。
+ *  end 语义与 slice(0, end) 一致（码元数，非字符数） */
+export function sliceUtf16Safe(s: string, end: number): string {
+  if (end >= s.length) return s;
+  if (end <= 0) return '';
+  const prev = s.charCodeAt(end - 1);
+  // 前一码元是高位代理且切点处恰是配对的低位代理：整对不可分，回退一位
+  if (prev >= 0xd800 && prev <= 0xdbff) {
+    const next = s.charCodeAt(end);
+    if (next >= 0xdc00 && next <= 0xdfff) return s.slice(0, end - 1);
+  }
+  return s.slice(0, end);
+}
+
 export function preview(text: string, max = 120): string {
   const one = text.replace(/\s+/g, ' ').trim();
-  return one.length > max ? one.slice(0, max) + '…' : one;
+  return one.length > max ? sliceUtf16Safe(one, max) + '…' : one;
 }
 
 /** 关键词命中分段（用于标题高亮）：拼音命中的部分无法定位，不做高亮 */

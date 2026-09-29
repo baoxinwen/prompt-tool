@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   Copy,
   Trash2,
@@ -45,12 +45,21 @@ const groups = computed(() => {
 
 const atTop = ref(true);
 const atBottom = ref(true);
+const listEl = ref<HTMLElement | null>(null);
 
-function updateEdges(e: Event) {
-  const el = e.target as HTMLElement;
+function updateEdges() {
+  const el = listEl.value;
+  if (!el) return;
   atTop.value = el.scrollTop < 8;
   atBottom.value = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
 }
+
+// 内容增删（含首次加载/后台剪贴板新增）不触发 scroll 事件，fade 遮罩
+// 在这里同步重算，避免「已溢出但不显底部渐隐」（评审 M18，与 QuickPanel
+// 的同型修复对齐）
+watch(groups, () => {
+  nextTick(updateEdges);
+});
 
 /** 图片缩略图惰性加载（与 QuickPanel 共用实现，评审 M9） */
 const { thumbFor } = useImageThumbs();
@@ -198,6 +207,7 @@ onBeforeUnmount(() => {
     </header>
 
     <div
+      ref="listEl"
       class="list"
       :class="{ 'fade-top': !atTop, 'fade-bottom': !atBottom }"
       @scroll="updateEdges"

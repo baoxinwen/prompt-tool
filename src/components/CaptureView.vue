@@ -20,9 +20,13 @@ const titleInput = ref<HTMLInputElement | null>(null);
 async function load() {
   try {
     data.value = await api.getData();
-    // 默认分类 = 第一个分类；用户手选后（truthy）不被覆盖，跨次捕获保留
-    if (!category.value) {
-      category.value = data.value?.categories[0] ?? '未分类';
+    const cats = data.value?.categories ?? [];
+    // 默认分类 = 第一个分类；用户手选后（truthy）不被覆盖，跨次捕获保留。
+    // 已选分类被删除（管理窗操作 + data-changed 刷新）时回退默认：悬挂值
+    // 会让 select 显示空值，保存时经后端 ensure_category 静默复活已删分类（评审 I-14）
+    const fallback = cats[0] ?? '未分类';
+    if (!category.value || !cats.includes(category.value)) {
+      category.value = fallback;
     }
   } catch {
     /* 忽略 */

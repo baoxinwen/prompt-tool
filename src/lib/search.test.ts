@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { matchText, filterPrompts, filterClipboard, formatTime, preview, highlightSegs } from './search';
+import { matchText, filterPrompts, filterClipboard, formatTime, preview, highlightSegs, sliceUtf16Safe } from './search';
 import type { Prompt } from '../types';
 
 function prompt(overrides: Partial<Prompt> & { id: string; title: string }): Prompt {
@@ -211,5 +211,27 @@ describe('formatTime', () => {
     vi.setSystemTime(new Date(2026, 7, 31, 0, 5));
     expect(formatTime(new Date(2026, 7, 30, 9, 5).getTime())).toBe('8/30 09:05');
     expect(formatTime(new Date(2025, 11, 1, 23, 59).getTime())).toBe('12/1 23:59');
+  });
+});
+
+// ---------- sliceUtf16Safe：截断不切碎代理对（评审 M21） ----------
+
+describe('sliceUtf16Safe', () => {
+  it('切点落在代理对中间时回退一位，不以孤立代理结尾', () => {
+    const emoji = '😀😀😀'; // 6 个 UTF-16 码元（每字 2 码元）
+    expect(sliceUtf16Safe(emoji, 1)).toBe(''); // 第一对中间：回退到 0
+    expect(sliceUtf16Safe(emoji, 2)).toBe('😀'); // 恰在边界：原样切
+    expect(sliceUtf16Safe(emoji, 5)).toBe('😀😀'); // 第三对中间：回退到 4
+    expect(sliceUtf16Safe('abc', 2)).toBe('ab'); // BMP 字符不受影响
+    expect(sliceUtf16Safe('abc', 10)).toBe('abc'); // 超长原样返回
+    expect(sliceUtf16Safe('', 3)).toBe('');
+  });
+
+  it('preview 截断全 emoji 内容不产生孤立代理（评审 M21）', () => {
+    const text = '😀'.repeat(80); // 160 码元
+    const out = preview(text, 101); // 切点 101 落在代理对中间
+    const body = out.endsWith('…') ? out.slice(0, -1) : out;
+    expect(/[\uD800-\uDBFF]$/.test(body)).toBe(false);
+    expect(body.length).toBe(100); // 回退一位
   });
 });

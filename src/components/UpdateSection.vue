@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, watch } from 'vue';
 import { RefreshCw } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import {
@@ -133,6 +133,17 @@ onMounted(() => {
     return;
   }
   info.value = cached;
+  phase.value = 'available';
+  lastAutoUpdate.value = null; // 一次性消费
+});
+
+// 挂载后到达的自动检查结果也必须消费（评审 I-15）：用户停留在设置页时
+// 点「去更新」，Manager.switchTab 对同页 early return、组件不重挂载，
+// 仅靠 onMounted 会漏掉——toast 的「去更新」点了没反应
+watch(lastAutoUpdate, (v) => {
+  if (v?.kind !== 'available') return;
+  if (phase.value === 'downloading' || phase.value === 'installing') return;
+  info.value = v;
   phase.value = 'available';
   lastAutoUpdate.value = null; // 一次性消费
 });

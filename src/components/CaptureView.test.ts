@@ -71,6 +71,36 @@ describe('CaptureView：快速捕获', () => {
     expect((w.find('select').element as HTMLSelectElement).value).toBe('开发');
   });
 
+  // 评审 I-14：捕获窗常驻，管理窗删除已选分类后 data-changed 刷新分类列表，
+  // 悬挂的已选分类必须回退默认——否则 select 显示空值，保存时经后端
+  // ensure_category 静默复活已删分类
+  it('已选分类被删除后回退第一个分类（I-14）', async () => {
+    const { listen } = await import('@tauri-apps/api/event');
+    let onDataChanged: (() => void) | undefined;
+    vi.mocked(listen).mockImplementation((async (
+      _ev: string,
+      cb: (e: unknown) => void,
+    ) => {
+      // 只捕获 data-changed（第二个注册的监听）
+      onDataChanged = cb as () => void;
+      return () => undefined;
+    }) as never);
+    const w = mountView();
+    await flushPromises();
+    await w.find('select').setValue('开发'); // 手选「开发」
+
+    // 模拟 data-changed：分类列表刷新，「开发」已被删除
+    mockedApi.getData.mockImplementation(async () => ({ categories: ['写作'] }) as unknown as AppData);
+    onDataChanged!();
+    await flushPromises();
+
+    // 保存载荷的分类必须回退到现存的第一个分类，不得携带悬挂值
+    await w.find('.cv-content').setValue('正文');
+    await w.find('.cv-foot .ab').trigger('click');
+    await flushPromises();
+    expect(mockedApi.savePrompt.mock.calls[0][0].category).toBe('写作');
+  });
+
   it('C3：保存键位提示含 Ctrl S（窗口已加宽）', async () => {
     const w = mountView();
     await flushPromises();
@@ -79,7 +109,7 @@ describe('CaptureView：快速捕获', () => {
 
   it('C1：保存中禁用并显示保存中…，成功后「✓ 已保存」停留约 0.6s 再关窗', async () => {
     let resolveSave: () => void = () => {};
-    mockedApi.savePrompt.mockImplementation(() => new Promise<string>((r) => (resolveSave = () => r("captured-1"))));
+    mockedApi.savePrompt.mockImplementation(() => new Promise<import('../types').SavePromptResult>((r) => (resolveSave = () => r({ id: 'captured-1', warning: null }))));
     const w = mountView();
     await flushPromises();
     await w.find('.cv-content').setValue('正文');
