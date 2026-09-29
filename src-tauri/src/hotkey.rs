@@ -101,7 +101,15 @@ fn trigger_prompt_impl<R: Runtime>(app: &AppHandle<R>, id: &str) {
         return;
     }
 
-    // 无变量：记录前台窗口后直接粘贴（面板保持隐藏）
+    // 无变量：记录前台窗口后直接粘贴（面板保持隐藏）。
+    // {{clipboard}} 自动变量此前在热键直贴路径粘贴字面量占位符（评审 I-8）：
+    // 填充逻辑只在前端面板路径实现。此处对齐面板行为——读剪贴板填充后再粘贴
+    let content = if has_clipboard_var(&p.content) {
+        let clip = crate::paste::get_clipboard_text();
+        fill_clipboard_var(&p.content, clip.as_deref())
+    } else {
+        p.content.clone()
+    };
     {
         let fg = crate::paste::foreground::current();
         let mut store = crate::store::lock(app);
@@ -116,7 +124,7 @@ fn trigger_prompt_impl<R: Runtime>(app: &AppHandle<R>, id: &str) {
             }
         });
     }
-    if let Err(e) = crate::paste::paste_text(app, &p.content) {
+    if let Err(e) = crate::paste::paste_text(app, &content) {
         eprintln!("[prompt-tool] 快捷键粘贴失败: {e}");
     }
 }
@@ -138,6 +146,76 @@ fn has_vars(content: &str) -> bool {
     false
 }
 
+/// 从 start（指向 "{{"）尝试匹配 clipboard 占位符，返回闭合 "}}" 之后的字节位。
+/// 语法与前端 clipboardVarRe 对齐：`{{ 空白* clipboard ( 空白* | [^{}]* )? 空白* }}`，
+/// 名字大小写不敏感；名字后紧跟其他字符（如 {{clipboards}}）不匹配
+fn match_clipboard_placeholder(s: &str, start: usize) -> Option<usize> {
+    let b = s.as_bytes();
+    let mut i = start + 2;
+    // 前导空白
+    while matches!(b.get(i), Some(b' ' | b'\t' | b'\n' | b'\r')) {
+        i += 1;
+    }
+    const NAME: &[u8] = b"clipboard";
+    if b.len() < i + NAME.len() || !b[i..i + NAME.len()].eq_ignore_ascii_case(NAME) {
+        return None;
+    }
+    i += NAME.len();
+    // 名字后的空白（pipe 前后与 "}}" 前都允许，见前端正则 \s*clipboard(?:\s*\|…)?\s*\}\}）
+    while matches!(b.get(i), Some(b' ' | b'\t' | b'\n' | b'\r')) {
+        i += 1;
+    }
+    if b.get(i) == Some(&b'|') {
+        i += 1;
+        // 提示部分 [^{}]*：扫描到 "}}"，遇 '{' 判不匹配（与前端正则一致，禁嵌套花括号）
+        while let Some(&c) = b.get(i) {
+            if c == b'{' {
+                return None;
+            }
+            if c == b'}' {
+                break;
+            }
+            i += 1;
+        }
+    }
+    (b.get(i) == Some(&b'}') && b.get(i + 1) == Some(&b'}')).then_some(i + 2)
+}
+
+/// 热键直贴路径的 {{clipboard}} 填充（评审 I-8）：与前端 applyClipboardVar
+/// 语义一致——无剪贴板文本时替换为空串（clip ?? ''），不是保留占位符
+fn fill_clipboard_var(content: &str, clip: Option<&str>) -> String {
+    let replacement = clip.unwrap_or("");
+    let b = content.as_bytes();
+    let mut out = String::with_capacity(content.len());
+    let mut i = 0usize;
+    while i < content.len() {
+        if b[i] == b'{' && b.get(i + 1) == Some(&b'{') {
+            if let Some(end) = match_clipboard_placeholder(content, i) {
+                out.push_str(replacement);
+                i = end;
+                continue;
+            }
+        }
+        // 匹配失败：拷贝一个完整字符后滑动（与正则引擎逐位滑动一致）
+        let ch = content[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+fn has_clipboard_var(content: &str) -> bool {
+    let b = content.as_bytes();
+    let mut i = 0usize;
+    while i + 1 < content.len() {
+        if b[i] == b'{' && b[i + 1] == b'{' && match_clipboard_placeholder(content, i).is_some() {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 /// 快捷键是否含有效修饰键：裸字母/数字键注册成功后会全局拦截该键，
 /// 系统级打字被劫持（评审 2026-09-10 M7#10）。与前端 HotkeyInput 口径一致：
 /// Shift 单独不算（仅 Shift 不满足绑定要求）
@@ -145,6 +223,35 @@ fn has_effective_modifier(normalized: &str) -> bool {
     normalized
         .split('+')
         .any(|part| matches!(part, "alt" | "ctrl" | "super" | "win" | "meta"))
+}
+
+/// 系统常用组合黑名单主键：单 ctrl/alt 修饰 + 这些键一旦被全局注册，
+/// 会在所有应用里劫持复制/粘贴/撤销/保存/查找/切换窗口/关闭窗口等
+/// 系统级操作（评审 I-2）。双修饰组合（ctrl+shift+v）与非常用键不拦
+const SYSTEM_COMBO_MAIN_KEYS: &[&str] = &[
+    "a", "c", "v", "x", "z", "y", "s", "n", "o", "p", "f", "w", "t", "r", "l", "d",
+    "tab", "f4", "enter", "esc", "space", "backspace", "insert", "delete", "prtsc",
+];
+
+/// 是否为系统常用组合（评审 I-2）：恶意/被篡改的导入包或云同步载荷
+/// 带 ctrl+v 之类热键时，全局注册成功即可吞掉系统按键并向前台窗口注入
+/// 文本，影响面从本应用扩大到整个操作系统。save_prompt 校验与
+/// sanitize 兜底共用这一个判定
+fn is_system_combo(normalized: &str) -> bool {
+    let parts: Vec<&str> = normalized.split('+').collect();
+    // 含 Win/Super/Meta：劫持 Win+L/D/E 等系统功能，一律拦
+    if parts
+        .iter()
+        .any(|p| matches!(*p, "super" | "win" | "meta"))
+    {
+        return true;
+    }
+    let main = parts.last().copied().unwrap_or("");
+    let modifiers = &parts[..parts.len().saturating_sub(1)];
+    // 恰好一个修饰键且为 ctrl/alt（仅 shift 已被 has_effective_modifier 排除）
+    modifiers.len() == 1
+        && (modifiers[0] == "ctrl" || modifiers[0] == "alt")
+        && SYSTEM_COMBO_MAIN_KEYS.contains(&main)
 }
 
 /// 导入 / 云同步合并后清理提示词快捷键：
@@ -167,7 +274,11 @@ pub fn sanitize_prompt_hotkeys(data: &mut crate::models::AppData) {
             continue;
         }
         let n = normalize(&p.hotkey);
-        if n.is_empty() || !has_effective_modifier(&n) || !seen.insert(n) {
+        if n.is_empty()
+            || !has_effective_modifier(&n)
+            || is_system_combo(&n)
+            || !seen.insert(n)
+        {
             p.hotkey = String::new();
             p.updated_at = now_ms();
         }
@@ -257,6 +368,12 @@ pub fn validate_prompt_hotkey<R: Runtime>(app: &AppHandle<R>, prompt_id: &str, h
         return Ok(());
     }
     let normalized = normalize(hk);
+    // 系统常用组合（评审 I-2）：全局注册会劫持所有应用的复制/粘贴/切换窗口
+    // 等系统级操作。UI 路径在此卡口拦截；导入/同步路径绕过这里，由
+    // sanitize_prompt_hotkeys 同口径兜底
+    if is_system_combo(&normalized) {
+        return Err("该组合是系统常用按键（如复制/粘贴/切换窗口），不能绑定".into());
+    }
     let (main_hotkey, capture_hotkey) = {
         let store = crate::store::lock(app);
         (
@@ -406,6 +523,75 @@ mod tests {
         data.prompts.push(prompt_with_hotkey("p1", "   ", 7));
         sanitize_prompt_hotkeys(&mut data);
         assert_eq!(data.prompts[0].updated_at, 7, "空快捷键不应触发 updated_at 变化");
+    }
+
+    // 评审 I-2：系统常用组合一旦被全局注册会劫持系统级操作（复制/粘贴/
+    // 切换窗口/关闭窗口），影响范围超出本应用。导入/同步投递的提示词包
+    // 带 ctrl+v 之类的热键必须被 sanitize 兜底清空
+    #[test]
+    fn sanitize_strips_system_combos() {
+        let mut data = AppData::default();
+        for (i, hk) in ["ctrl+v", "Ctrl+C", "alt+tab", "ALT+F4", "win+d", "super+p"].iter().enumerate() {
+            data.prompts.push(prompt_with_hotkey(&format!("p{i}"), hk, 5));
+        }
+        sanitize_prompt_hotkeys(&mut data);
+        for p in &data.prompts {
+            assert!(p.hotkey.is_empty(), "系统组合 {} 必须清空", p.hotkey);
+        }
+    }
+
+    // 评审 I-2：双修饰组合（ctrl+shift+v 等）与非常用键不在黑名单，
+    // 不得误伤合法绑定
+    #[test]
+    fn sanitize_keeps_non_system_combos() {
+        let mut data = AppData::default();
+        data.prompts.push(prompt_with_hotkey("p1", "ctrl+shift+v", 5));
+        data.prompts.push(prompt_with_hotkey("p2", "ctrl+k", 5));
+        data.prompts.push(prompt_with_hotkey("p3", "alt+q", 5)); // 与主键同键会被冲突清理，换 alt+j
+        data.prompts[2].hotkey = "alt+j".into();
+        sanitize_prompt_hotkeys(&mut data);
+        assert_eq!(data.prompts[0].hotkey, "ctrl+shift+v", "双修饰组合保留");
+        assert_eq!(data.prompts[1].hotkey, "ctrl+k", "非常用键保留");
+        assert_eq!(data.prompts[2].hotkey, "alt+j", "黑名单外的 alt 组合保留");
+    }
+
+    #[test]
+    fn is_system_combo_truth_table() {
+        // 单修饰 ctrl/alt + 常用主键：拦
+        for hk in ["ctrl+a", "ctrl+c", "ctrl+v", "ctrl+x", "ctrl+z", "ctrl+s", "ctrl+f",
+                   "alt+tab", "alt+f4", "alt+enter", "ctrl+prtsc", "alt+space"] {
+            assert!(is_system_combo(hk), "{hk} 应判为系统组合");
+        }
+        // 含 Win/Super/Meta：拦（劫持 Win+L/D/E 等系统功能）
+        for hk in ["win+d", "super+l", "meta+r", "ctrl+win+left"] {
+            assert!(is_system_combo(hk), "{hk} 应判为系统组合");
+        }
+        // 双修饰、非常用键、裸键：不拦
+        for hk in ["ctrl+shift+v", "alt+shift+t", "ctrl+k", "alt+j", "ctrl+f9", "v"] {
+            assert!(!is_system_combo(hk), "{hk} 不应判为系统组合");
+        }
+    }
+
+    // ---------- fill_clipboard_var：热键直贴路径的 {{clipboard}} 填充（评审 I-8） ----------
+
+    #[test]
+    fn fill_clipboard_var_matches_frontend_semantics() {
+        assert_eq!(fill_clipboard_var("你好 {{clipboard}}", Some("世界")), "你好 世界");
+        assert_eq!(fill_clipboard_var("{{ CLIPBOARD }}", Some("x")), "x", "大小写与空白容忍");
+        assert_eq!(fill_clipboard_var("{{clipboard|从剪贴板取}}", Some("y")), "y", "带提示写法");
+        assert_eq!(fill_clipboard_var("a{{clipboard}}b{{clipboard}}", Some("z")), "azbz", "全部替换");
+        assert_eq!(fill_clipboard_var("{{clipboard}}", None), "", "无剪贴板文本时替换为空串（前端 clip ?? ''）");
+        assert_eq!(fill_clipboard_var("{{clipboards}}", Some("x")), "{{clipboards}}", "名字更长不匹配");
+        assert_eq!(fill_clipboard_var("{{clipboard", Some("x")), "{{clipboard", "未闭合保留原文");
+        assert_eq!(fill_clipboard_var("普通文本", Some("x")), "普通文本");
+    }
+
+    #[test]
+    fn has_clipboard_var_detects_placeholder() {
+        assert!(has_clipboard_var("见 {{clipboard}} 上下文"));
+        assert!(has_clipboard_var("{{ Clipboard | 提示 }}"));
+        assert!(!has_clipboard_var("{{名字}} 手动变量"));
+        assert!(!has_clipboard_var("无占位符"));
     }
 
     // ---------- one_third_top：面板垂直定位（工作区上 1/3） ----------
