@@ -13,6 +13,13 @@ export interface Prompt {
   updatedAt: number;
 }
 
+/** save_prompt 的返回：保存结果与快捷键注册警告分离（评审 I-3）——
+ *  热键注册失败时数据已保存，警告随成功载荷返回而非 Err */
+export interface SavePromptResult {
+  id: string;
+  warning: string | null;
+}
+
 export interface ClipboardImageRef {
   file: string;
   width: number;

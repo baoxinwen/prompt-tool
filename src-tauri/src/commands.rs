@@ -102,30 +102,52 @@ fn delete_category_in(data: &mut AppData, name: &str) {
     }
 }
 
-/// 按扩展名把单个文件内容导入数据；ext 已小写，file_stem 供 txt 作标题
-fn import_dispatch(
-    data: &mut AppData,
+/// 导入文件的锁外解析产物（评审 I-17）：JSON 反序列化是 50MB 上限内的
+/// 性能大头，持全局 Store 锁执行会让热键/剪贴板监听/所有命令在解析期间
+/// 排队冻结——先在锁外解析，锁内只做合并应用
+enum ParsedImportFile {
+    Json(transfer::ParsedImport),
+    Markdown(String),
+    Text { text: String, title: String },
+}
+
+/// 按扩展名解析单个文件内容；ext 已小写，file_stem 供 txt 作标题
+fn parse_import_file(
     ext: &str,
     file_stem: Option<&str>,
-    text: &str,
-) -> Result<(usize, usize), String> {
+    text: String,
+) -> Result<ParsedImportFile, String> {
     match ext {
-        "json" => transfer::import_json(data, text),
-        "md" | "markdown" => {
-            let (a, s) = transfer::import_markdown(data, text, "未分类");
-            Ok((a, s))
-        }
+        "json" => Ok(ParsedImportFile::Json(transfer::parse_import(&text)?)),
+        "md" | "markdown" => Ok(ParsedImportFile::Markdown(text)),
         "txt" => {
             let title = file_stem
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "导入文本".into());
-            if transfer::import_text(data, &title, text) {
+            Ok(ParsedImportFile::Text { text, title })
+        }
+        other => Err(format!("不支持的格式: {other}")),
+    }
+}
+
+/// 锁内应用已解析的导入内容
+fn apply_import_file(
+    data: &mut AppData,
+    parsed: ParsedImportFile,
+) -> Result<(usize, usize), String> {
+    match parsed {
+        ParsedImportFile::Json(p) => transfer::apply_import_json(data, &p),
+        ParsedImportFile::Markdown(text) => {
+            let (a, s) = transfer::import_markdown(data, &text, "未分类");
+            Ok((a, s))
+        }
+        ParsedImportFile::Text { text, title } => {
+            if transfer::import_text(data, &title, &text) {
                 Ok((1, 0))
             } else {
                 Ok((0, 1))
             }
         }
-        other => Err(format!("不支持的格式: {other}")),
     }
 }
 
@@ -154,29 +176,42 @@ pub fn get_data(app: AppHandle, window: WebviewWindow) -> AppData {
 }
 
 #[tauri::command]
-pub async fn save_prompt(app: AppHandle, prompt: Prompt) -> Result<String, String> {
+pub async fn save_prompt(app: AppHandle, prompt: Prompt) -> Result<SavePromptResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         hotkey::validate_prompt_hotkey(&app, &prompt.id, &prompt.hotkey)?;
         let mut store = lock(&app);
         let saved_id = store.mutate(|d| upsert_prompt(d, prompt.clone()))?;
         drop(store);
-        // 注册失败要回传给用户：数据已保存（上面 mutate 已落盘），但快捷键按下无反应，
-        // 静默失败会让用户以为绑定成功而无法自助排查
+        // 注册警告不再编码进 Err 通道（评审 I-3）：数据已保存是既成事实，
+        // Err 会让前端按「未保存」处理并经 900ms 自动保存重试，同一提示词
+        // 被 new_id() 重复建档并可能随同步扩散。改为随成功载荷返回警告
         let failed = hotkey::register_all(&app);
-        if !prompt.hotkey.trim().is_empty()
+        let warning = if !prompt.hotkey.trim().is_empty()
             && failed.iter().any(|a| *a == hotkey::normalize(&prompt.hotkey))
         {
-            emit_data_changed(&app);
-            return Err(format!(
+            Some(format!(
                 "提示词已保存，但独立快捷键 {} 注册失败（可能被其他程序占用），按下不会生效",
                 prompt.hotkey
-            ));
-        }
+            ))
+        } else {
+            None
+        };
         emit_data_changed(&app);
-        Ok(saved_id)
+        Ok(SavePromptResult {
+            id: saved_id,
+            warning,
+        })
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// save_prompt 的返回：保存结果与快捷键注册警告分离（评审 I-3）
+#[derive(Debug, serde::Serialize)]
+pub struct SavePromptResult {
+    pub id: String,
+    #[serde(rename = "warning")]
+    pub warning: Option<String>,
 }
 
 #[tauri::command]
@@ -264,32 +299,39 @@ pub async fn delete_category(app: AppHandle, name: String) -> Result<(), String>
 
 // ---------- 剪贴板 / 粘贴 ----------
 
+// b3bccf9 引入的剪贴板写入短重试在剪贴板被占用时最多阻塞约 150ms：
+// 两个命令迁移为 async + spawn_blocking（评审 M22），与 invoke_paste 同
+// 范式，不再卡 UI 主线程
 #[tauri::command]
-pub fn copy_text(app: AppHandle, text: String) -> Result<(), String> {
-    let generation = {
-        let mut store = lock(&app);
-        store.suppress_clipboard = true;
-        // 使仍在飞行的粘贴会话收尾失效：它们若照常恢复原剪贴板，
-        // 会覆盖刚写入的复制内容（评审 M1 同源问题）
-        store.paste_generation += 1;
-        store.paste_generation
-    };
-    // 写入失败必须解除抑制，否则剪贴板历史从此静默失效直到重启。
-    // 按代际判断（M6#7）：失败瞬间可能已有新会话推进代际，直接清标志
-    // 会提前解除新会话的抑制，使其内容被误记进剪贴板历史
-    if let Err(e) = paste::set_clipboard_text(&text) {
-        lock(&app).release_suppress_if_current(generation);
-        return Err(e);
-    }
-    let h = app.clone();
-    std::thread::spawn(move || {
-        // 与其他写入路径共用抑制窗口：跨过一个完整轮询周期，监听线程
-        // 把本次写入吸收进基线后才解除。代际已变（期间又有新写入会话）
-        // 时不得解除，否则会把新会话写入的内容误记进历史（评审 I2）
-        std::thread::sleep(crate::clipboard::SUPPRESS_WINDOW);
-        lock(&h).release_suppress_if_current(generation);
-    });
-    Ok(())
+pub async fn copy_text(app: AppHandle, text: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let generation = {
+            let mut store = lock(&app);
+            store.suppress_clipboard = true;
+            // 使仍在飞行的粘贴会话收尾失效：它们若照常恢复原剪贴板，
+            // 会覆盖刚写入的复制内容（评审 M1 同源问题）
+            store.paste_generation += 1;
+            store.paste_generation
+        };
+        // 写入失败必须解除抑制，否则剪贴板历史从此静默失效直到重启。
+        // 按代际判断（M6#7）：失败瞬间可能已有新会话推进代际，直接清标志
+        // 会提前解除新会话的抑制，使其内容被误记进剪贴板历史
+        if let Err(e) = paste::set_clipboard_text(&text) {
+            lock(&app).release_suppress_if_current(generation);
+            return Err(e);
+        }
+        let h = app.clone();
+        std::thread::spawn(move || {
+            // 与其他写入路径共用抑制窗口：跨过一个完整轮询周期，监听线程
+            // 把本次写入吸收进基线后才解除。代际已变（期间又有新写入会话）
+            // 时不得解除，否则会把新会话写入的内容误记进历史（评审 I2）
+            std::thread::sleep(crate::clipboard::SUPPRESS_WINDOW);
+            lock(&h).release_suppress_if_current(generation);
+        });
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -317,8 +359,17 @@ pub async fn invoke_paste(
 }
 
 #[tauri::command]
-pub fn paste_text_direct(app: AppHandle, window: WebviewWindow, text: String) -> Result<(), String> {
-    paste::paste_to_previous_window(&window, &app, &text)
+pub async fn paste_text_direct(
+    app: AppHandle,
+    window: WebviewWindow,
+    text: String,
+) -> Result<(), String> {
+    // 内部含剪贴板写入短重试（最多约 150ms），不得在 UI 主线程内联执行（评审 M22）
+    tauri::async_runtime::spawn_blocking(move || {
+        paste::paste_to_previous_window(&window, &app, &text)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// 读取当前剪贴板文本（供 {{clipboard}} 自动变量使用）
@@ -412,9 +463,11 @@ pub async fn paste_image(app: AppHandle, window: WebviewWindow, id: String) -> R
             store.paste_generation += 1;
             store.paste_generation
         };
-        // 写入失败必须解除抑制，否则剪贴板历史从此静默失效直到重启
+        // 写入失败必须解除抑制，否则剪贴板历史从此静默失效直到重启。
+        // 按代际解除（评审 I-9，对齐 copy_text 的 M6#7 范式）：直接清标志会把
+        // 失败窗口内新会话写入的内容误记进剪贴板历史
         if let Err(e) = set_clipboard_image(&rgba) {
-            lock(&app).suppress_clipboard = false;
+            lock(&app).release_suppress_if_current(generation);
             return Err(e);
         }
 
@@ -453,8 +506,9 @@ pub async fn copy_image(app: AppHandle, id: String) -> Result<(), String> {
             store.paste_generation += 1;
             store.paste_generation
         };
+        // 按代际解除（评审 I-9，对齐 copy_text 的 M6#7 范式）
         if let Err(e) = set_clipboard_image(&rgba) {
-            lock(&app).suppress_clipboard = false;
+            lock(&app).release_suppress_if_current(generation);
             return Err(e);
         }
 
@@ -520,9 +574,15 @@ pub async fn clear_history(app: AppHandle) -> Result<usize, String> {
 }
 
 #[tauri::command]
-pub fn restore_history(app: AppHandle) -> Result<usize, String> {
-    let mut store = lock(&app);
-    restore_from_stash(&mut store)
+pub async fn restore_history(app: AppHandle) -> Result<usize, String> {
+    // 恢复走全量落盘（fsync+.bak+rename），同步命令会在 UI 主线程内联执行
+    // 卡顿主线程（评审 I-16，对齐 clear_history/delete_history_item 范式）
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut store = lock(&app);
+        restore_from_stash(&mut store)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// 撤销恢复的落库逻辑（可测，评审 2026-09-10 I13）：必须走 commit 而非裸
@@ -830,8 +890,17 @@ fn import_from_files(handle: &AppHandle, files: &[std::path::PathBuf]) -> Result
             .unwrap_or_default();
         let stem = path.file_stem().map(|s| s.to_string_lossy().to_string());
 
+        // 锁外解析（评审 I-17）：读取与反序列化都不持全局 Store 锁
+        let parsed = match parse_import_file(&ext, stem.as_deref(), text) {
+            Ok(p) => p,
+            Err(e) => {
+                errors.push(format!("{}: {e}", path.display()));
+                continue;
+            }
+        };
+
         let mut store = lock(handle);
-        let result = import_dispatch(&mut store.data, &ext, stem.as_deref(), &text);
+        let result = apply_import_file(&mut store.data, parsed);
         match result {
             Ok((a, s)) => {
                 total_added += a;
@@ -1117,16 +1186,21 @@ mod tests {
         assert!(p.updated_at > 1_000);
     }
 
-    // ---------- import_dispatch ----------
+    // ---------- import_dispatch（拆分为 parse_import_file + apply_import_file，评审 I-17） ----------
+
+    fn dispatch(data: &mut AppData, ext: &str, stem: Option<&str>, text: &str) -> Result<(usize, usize), String> {
+        let parsed = parse_import_file(ext, stem, text.to_string())?;
+        apply_import_file(data, parsed)
+    }
 
     #[test]
     fn dispatch_json_ok_and_error() {
         let mut d = AppData::default();
-        let (a, s) = import_dispatch(&mut d, "json", None, r#"[{"title":"T","content":"C"}]"#).unwrap();
+        let (a, s) = dispatch(&mut d, "json", None, r#"[{"title":"T","content":"C"}]"#).unwrap();
         assert_eq!((a, s), (1, 0));
         assert_eq!(d.prompts[0].title, "T");
 
-        let err = import_dispatch(&mut d, "json", None, "不是JSON").unwrap_err();
+        let err = dispatch(&mut d, "json", None, "不是JSON").unwrap_err();
         assert!(err.contains("JSON 解析失败"));
     }
 
@@ -1134,7 +1208,7 @@ mod tests {
     fn dispatch_markdown_uses_h1_category() {
         let mut d = AppData::default();
         let md = "# 我的分类\n\n## 标题A\n\n```\n正文\n```\n";
-        let (a, s) = import_dispatch(&mut d, "md", None, md).unwrap();
+        let (a, s) = dispatch(&mut d, "md", None, md).unwrap();
         assert_eq!((a, s), (1, 0));
         assert_eq!(d.prompts[0].category, "我的分类");
     }
@@ -1142,24 +1216,24 @@ mod tests {
     #[test]
     fn dispatch_txt_uses_file_stem_as_title() {
         let mut d = AppData::default();
-        let (a, s) = import_dispatch(&mut d, "txt", Some("便签"), "正文内容").unwrap();
+        let (a, s) = dispatch(&mut d, "txt", Some("便签"), "正文内容").unwrap();
         assert_eq!((a, s), (1, 0));
         assert_eq!(d.prompts[0].title, "便签");
 
         let mut d2 = AppData::default();
-        let (a2, s2) = import_dispatch(&mut d2, "txt", None, "正文内容").unwrap();
+        let (a2, s2) = dispatch(&mut d2, "txt", None, "正文内容").unwrap();
         assert_eq!((a2, s2), (1, 0));
         assert_eq!(d2.prompts[0].title, "导入文本", "无文件名时用兜底标题");
 
         let mut d3 = AppData::default();
-        let (a3, s3) = import_dispatch(&mut d3, "txt", Some("空白"), "   \n  ").unwrap();
+        let (a3, s3) = dispatch(&mut d3, "txt", Some("空白"), "   \n  ").unwrap();
         assert_eq!((a3, s3), (0, 1), "空白内容的 txt 应计为跳过");
     }
 
     #[test]
     fn dispatch_rejects_unsupported_extension() {
         let mut d = AppData::default();
-        let err = import_dispatch(&mut d, "pdf", Some("文件"), "内容").unwrap_err();
+        let err = dispatch(&mut d, "pdf", Some("文件"), "内容").unwrap_err();
         assert_eq!(err, "不支持的格式: pdf");
     }
 

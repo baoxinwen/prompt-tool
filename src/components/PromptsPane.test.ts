@@ -8,7 +8,7 @@ import type { AppData, Prompt } from '../types';
 
 vi.mock('../lib/api', () => ({
   api: {
-    savePrompt: vi.fn(async () => undefined),
+    savePrompt: vi.fn(async () => ({ id: '', warning: null }) as never),
     deletePrompt: vi.fn(async () => undefined),
     copyText: vi.fn(async () => undefined),
     addCategory: vi.fn(async () => undefined),
@@ -473,6 +473,63 @@ describe('PromptsPane：提示词管理', () => {
     }
   });
 
+  // 评审 I-3：热键注册失败此前由后端以 Err 返回，前端按「未保存」处理，
+  // 900ms 自动保存重试会把同一提示词重复建档。现在警告随成功载荷返回：
+  // 保存链按成功收尾（不重试），警告单独 toast
+  it('热键注册警告：保存按成功收尾并单独 toast，不触发重试（I-3）', async () => {
+    vi.useFakeTimers();
+    try {
+      mockedApi.savePrompt.mockResolvedValueOnce({
+        id: 'p1',
+        warning: '提示词已保存，但独立快捷键 ctrl+f9 注册失败',
+      });
+      const { wrapper, ctx } = await mountPane();
+      await wrapper.findAll('.pitem')[0].trigger('click');
+      await wrapper.find('input.d-title').setValue('热键冲突场景');
+      await vi.advanceTimersByTimeAsync(900);
+      await flushPromises();
+
+      expect(mockedApi.savePrompt).toHaveBeenCalledTimes(1);
+      expect(
+        ctx.toasts.some((t) => t.msg.includes('注册失败') && t.kind === 'err'),
+        '警告必须 toast 且为 err 级',
+      ).toBe(true);
+      expect(wrapper.find('.data-save').text()).toContain('已自动保存');
+      // 警告不触发自动保存重试（重试会重复建档）
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(mockedApi.savePrompt).toHaveBeenCalledTimes(1);
+      wrapper.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // 评审 M17：撤销编辑（改回快照内容）后 dirty 回算为 false，但「● 未保存」
+  // 指示卡死——markDirty 需同步把 saveState 拉回干净态
+  it('撤销编辑回到原内容后指示灯不再误报未保存（M17）', async () => {
+    const { wrapper } = await mountPane();
+    await wrapper.findAll('.pitem')[0].trigger('click');
+    const input = wrapper.find('input.d-title');
+    const original = (input.element as HTMLInputElement).value;
+    await input.setValue('临时修改');
+    expect(wrapper.find('.data-save').text()).toContain('未保存');
+    await input.setValue(original);
+    // 内容回到快照：saveState 回 idle，指示元素整体卸载（不再误报）
+    expect(wrapper.find('.data-save').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  // 评审 M19：无搜索词时列表截断 200 条必须提示（QuickPanel/ClipboardPane 均有）
+  it('超过 200 条时列表截断并显示未展示计数（M19）', async () => {
+    const many = Array.from({ length: 203 }, (_, i) =>
+      makePrompt({ id: `px${i}`, title: `条目${i}` }),
+    );
+    const { wrapper } = await mountPane(many);
+    expect(wrapper.findAll('.pitem').length).toBe(200);
+    expect(wrapper.text()).toContain('3 条未显示');
+    wrapper.unmount();
+  });
+
   it('填写变量并粘贴：applyVars 替换 + {{clipboard}} 自动填充 + 记忆回存 + 计数 toast', async () => {
     mockedApi.getClipboardText.mockImplementation(async () => '剪贴板内容');
     const { wrapper, ctx } = await mountPane([pVars]);
@@ -588,7 +645,7 @@ describe('PromptsPane：提示词管理', () => {
             makePrompt({ id: 'capture-x', title: '捕获', createdAt: 9_000 }),
           );
         }
-        return 'new-1';
+        return { id: 'new-1', warning: null };
       });
 
       await vi.advanceTimersByTimeAsync(900);

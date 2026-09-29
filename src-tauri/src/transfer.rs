@@ -95,21 +95,49 @@ pub fn export_markdown(data: &AppData) -> String {
     out
 }
 
-/// JSON 导入：兼容 完整备份 / 同步载荷 / {prompts:[...]} / 纯数组 四种形态。
-/// 按 id 合并：已存在的跳过。返回 (新增数, 跳过数)
-pub fn import_json(data: &mut AppData, text: &str) -> Result<(usize, usize), String> {
+/// 已解析的 JSON 导入载荷：反序列化与形态校验在锁外完成后，锁内只做
+/// 合并应用（评审 I-17）
+pub struct ParsedImport {
+    v: Value,
+}
+
+/// JSON 导入的锁外阶段（评审 I-17）：反序列化是 50MB 上限内的性能大头
+/// （可达秒级），不得在全局 Store 锁内执行，否则解析期间热键/剪贴板
+/// 监听/所有命令排队。形态校验也在此完成，锁内不再可能因缺字段失败
+pub fn parse_import(text: &str) -> Result<ParsedImport, String> {
     let v: Value =
         serde_json::from_str(text).map_err(|e| format!("JSON 解析失败: {e}"))?;
+    let has_prompts = match &v {
+        Value::Array(_) => true,
+        Value::Object(o) => o
+            .get("prompts")
+            .or_else(|| o.get("data"))
+            .map(|p| p.is_array())
+            .unwrap_or(false),
+        _ => false,
+    };
+    if !has_prompts {
+        return Err("JSON 中未找到 prompts 字段".into());
+    }
+    Ok(ParsedImport { v })
+}
 
-    let prompts_val = match &v {
-        Value::Array(_) => Some(&v),
+/// JSON 导入的锁内阶段（评审 I-17）：把已解析的载荷合并进数据。
+/// 纯函数语义，返回 (新增数, 跳过数)
+pub fn apply_import_json(
+    data: &mut AppData,
+    parsed: &ParsedImport,
+) -> Result<(usize, usize), String> {
+    let v = &parsed.v;
+    let prompts_val = match v {
+        Value::Array(_) => Some(v),
         Value::Object(o) => o
             .get("prompts")
             .or_else(|| o.get("data"))
             .filter(|p| p.is_array()),
         _ => None,
     };
-    let prompts_val = prompts_val.ok_or("JSON 中未找到 prompts 字段")?;
+    let prompts_val = prompts_val.expect("parse_import 已校验 prompts 字段存在");
 
     if let Value::Object(o) = &v {
         if let Some(Value::Array(cats)) = o.get("categories") {
@@ -238,8 +266,35 @@ pub fn import_json(data: &mut AppData, text: &str) -> Result<(usize, usize), Str
         data.ensure_category(&prompt.category);
         existing.insert(prompt.id.clone());
         existing_titles.insert(key_of(&prompt));
+        // 用户主动导回备份恢复已删条目是明确意图：清除对应墓碑，否则下一次
+        // merge 的墓碑 retain 会把条目静默回滚——反复导入反复消失（评审 I-6）
+        data.tombstones.retain(|t| t.id != prompt.id);
         data.prompts.push(prompt);
         added += 1;
+    }
+
+    // 剪贴板历史恢复（评审 I-7）：导出侧可勾选「包含剪贴板历史(不含图片)」，
+    // 此前导入侧不读该字段，备份往返保真断裂。与 merge/apply_pull 同口径：
+    // 跳过图片条目、按 id 去重并入、统一 copied_at 降序、收敛到条数上限
+    if let Value::Object(o) = v {
+        if let Some(Value::Array(clips)) = o.get("clipboard") {
+            for c in clips {
+                let Ok(item) = serde_json::from_value::<crate::models::ClipboardItem>(c.clone())
+                else {
+                    continue;
+                };
+                if item.is_image() {
+                    continue;
+                }
+                if data.clipboard.iter().any(|i| i.id == item.id) {
+                    continue;
+                }
+                data.clipboard.push(item);
+            }
+            data.clipboard
+                .sort_by_key(|i| std::cmp::Reverse(i.copied_at));
+            data.clipboard.truncate(crate::models::MAX_CLIPBOARD_ITEMS);
+        }
     }
     Ok((added, skipped))
 }
@@ -663,6 +718,106 @@ mod tests {
     }
 
     // ---------- import_json：四种形态与去重 ----------
+
+    /// 测试用一步式入口（评审 I-17 拆分后生产路径分两段：锁外 parse_import +
+    /// 锁内 apply_import_json，见 commands.rs 的 import_from_files）
+    fn import_json(data: &mut AppData, text: &str) -> Result<(usize, usize), String> {
+        let parsed = parse_import(text)?;
+        apply_import_json(data, &parsed)
+    }
+
+    fn stub_import_prompt(id: &str, updated_at: u64) -> crate::models::Prompt {
+        crate::models::Prompt {
+            id: id.to_string(),
+            title: format!("标题-{id}"),
+            content: "正文".into(),
+            category: "开发".into(),
+            tags: vec![],
+            pinned: false,
+            hotkey: String::new(),
+            use_count: 0,
+            last_used_at: 0,
+            created_at: 1,
+            updated_at,
+        }
+    }
+
+    // 评审 I-6：用户主动导回旧备份恢复已删条目是明确意图，收录时必须清除
+    // 对应墓碑——否则开启同步后下一次 merge 的墓碑 retain 会把条目静默
+    // 回滚，反复导入反复消失
+    #[test]
+    fn import_restored_entry_clears_its_tombstone() {
+        let mut data = AppData::default();
+        data.tombstone("p1"); // 曾删除过 p1（at=now，晚于备份里的 updated_at=1）
+        let backup = serde_json::json!({
+            "prompts": [stub_import_prompt("p1", 1)],
+            "tombstones": [{"id": "p1", "at": 9999}],
+        });
+        let (added, _) = import_json(&mut data, &backup.to_string()).unwrap();
+        assert_eq!(added, 1, "条目必须收录");
+        assert!(data.prompts.iter().any(|p| p.id == "p1"), "恢复的条目必须在库");
+        assert!(
+            !data.tombstones.iter().any(|t| t.id == "p1"),
+            "收录条目对应的墓碑必须清除，否则下一次 merge 会把它静默删除"
+        );
+    }
+
+    // 评审 I-7：导出侧可勾选「包含剪贴板历史(不含图片)」，导入侧此前不读
+    // clipboard 字段——备份往返保真断裂，用户显式备份的内容在恢复时静默丢失
+    #[test]
+    fn import_json_restores_clipboard_history_roundtrip() {
+        let mut data = AppData::default();
+        data.clipboard.push(crate::models::ClipboardItem {
+            id: "c2".into(),
+            content: "新内容".into(),
+            copied_at: 200,
+            kind: "text".into(),
+            image: None,
+        });
+        data.clipboard.push(crate::models::ClipboardItem {
+            id: "c1".into(),
+            content: "旧内容".into(),
+            copied_at: 100,
+            kind: "text".into(),
+            image: None,
+        });
+        let exported = export_json(&data, true).unwrap();
+        assert!(exported.contains("clipboard"), "导出必须包含剪贴板字段");
+
+        let mut restored = AppData::default();
+        restored.clipboard.push(crate::models::ClipboardItem {
+            id: "local".into(),
+            content: "本机既有".into(),
+            copied_at: 50,
+            kind: "text".into(),
+            image: None,
+        });
+        let (added, skipped) = import_json(&mut restored, &exported).unwrap();
+        assert_eq!((added, skipped), (0, 0), "剪贴板恢复不影响提示词计数");
+        assert_eq!(restored.clipboard.len(), 3, "备份的剪贴板历史必须恢复");
+        // 与 merge/apply_pull 同口径：统一按 copied_at 降序
+        assert_eq!(restored.clipboard[0].id, "c2");
+        assert_eq!(restored.clipboard[1].id, "c1");
+        assert_eq!(restored.clipboard[2].id, "local");
+    }
+
+    // 评审 I-7：重复导入同一备份不得复制剪贴板条目（按 id 去重）
+    #[test]
+    fn import_json_clipboard_dedupes_by_id() {
+        let mut data = AppData::default();
+        data.clipboard.push(crate::models::ClipboardItem {
+            id: "c1".into(),
+            content: "内容".into(),
+            copied_at: 100,
+            kind: "text".into(),
+            image: None,
+        });
+        let exported = export_json(&data, true).unwrap();
+        data.clipboard.clear();
+        import_json(&mut data, &exported).unwrap();
+        import_json(&mut data, &exported).unwrap();
+        assert_eq!(data.clipboard.len(), 1, "重复导入必须按 id 去重");
+    }
 
     #[test]
     fn import_json_accepts_four_payload_shapes() {

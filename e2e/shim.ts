@@ -125,7 +125,8 @@ export const tauriShim = (seed: ShimSeed) => {
       if (i >= 0) state.data.prompts[i] = p;
       else state.data.prompts.push(p);
       persist();
-      return null;
+      // 与后端 SavePromptResult 对齐（评审 I-3）：id + 热键注册警告（shim 无热键，恒 null）
+      return { id: p.id, warning: null };
     },
     delete_prompt: ({ id }) => {
       state.data.prompts = state.data.prompts.filter((x: any) => x.id !== id);

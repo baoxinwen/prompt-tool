@@ -75,7 +75,11 @@ let varLoadSeq = 0;
 const allPrompts = computed(() => ctx.data.value?.prompts ?? []);
 const categories = computed(() => ctx.data.value?.categories ?? []);
 
-const shown = computed(() => {
+/** 无搜索词时的列表渲染上限（评审 M19：截断必须配「还有 N 条」提示） */
+const LIST_RENDER_LIMIT = 200;
+
+/** 过滤（分类/搜索）+ 排序后的基准列表 */
+const sortedBase = computed(() => {
   let list = allPrompts.value;
   if (selectedCategory.value) list = list.filter((p) => p.category === selectedCategory.value);
   const q = query.value.trim().toLowerCase();
@@ -87,13 +91,21 @@ const shown = computed(() => {
         p.tags.some((t) => matchText(t, q)),
     );
   }
-  const sorted = [...list].sort((a, b) => {
+  return [...list].sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     return b.updatedAt - a.updatedAt;
   });
-  // 大列表截断渲染，避免 DOM 堆积
-  return query.value.trim() ? sorted : sorted.slice(0, 200);
 });
+
+const shown = computed(() => {
+  // 大列表截断渲染，避免 DOM 堆积（搜索时不截断）
+  return query.value.trim() ? sortedBase.value : sortedBase.value.slice(0, LIST_RENDER_LIMIT);
+});
+
+/** 因截断未渲染的条数（仅无搜索词时截断） */
+const hiddenCount = computed(() =>
+  query.value.trim() ? 0 : Math.max(0, sortedBase.value.length - LIST_RENDER_LIMIT),
+);
 
 const catCounts = computed(() => {
   const m = new Map<string, number>();
@@ -162,6 +174,10 @@ function markDirty() {
   if (dirty.value) {
     saveState.value = 'dirty';
     scheduleAutoSave();
+  } else if (saveState.value === 'dirty') {
+    // 内容改回快照（如 Ctrl+Z 撤销到原样）：dirty 已回算 false，
+    // 「● 未保存」若残留即误报（评审 M17）；saved 提示不受影响
+    saveState.value = 'idle';
   }
 }
 
@@ -184,11 +200,13 @@ async function saveCore(opts: { silent?: boolean } = {}): Promise<boolean> {
   const wasNew = !selectedId.value;
   let savedId: string;
   try {
-    // 后端回传建档 id：不再用「createdAt 最新」启发式反查——并发建档
-    // （如全局快速捕获）会让启发式绑错条目，随后的自动保存会覆盖别人的
-    // 数据（评审 2026-09-10 I5）
-    savedId = await api.savePrompt({ ...draft.value });
+    // 后端回传建档 id 与热键警告（评审 I-3）：警告（如热键被占用）此前编码在
+    // Err 通道，会被下方 catch 按「未保存」处理并触发自动保存重试，同一
+    // 提示词被重复建档——现在按成功收尾，警告单独 toast
+    const res = await api.savePrompt({ ...draft.value });
+    savedId = res.id;
     await ctx.refresh();
+    if (res.warning) ctx.toast(res.warning, 'err');
   } catch (e) {
     ctx.toast(String(e), 'err');
     return false;
@@ -668,6 +686,10 @@ function fmtTime(ts: number) {
           <EmptyState v-if="!shown.length" :icon="Sparkles" title="暂无提示词">
             点右上角「新建」添加第一条
           </EmptyState>
+          <!-- 截断提示（评审 M19）：与 QuickPanel/ClipboardPane 同款口径 -->
+          <div v-if="hiddenCount > 0" class="truncated muted">
+            还有 {{ hiddenCount }} 条未显示，输入关键词继续筛选
+          </div>
         </div>
       </div>
 
