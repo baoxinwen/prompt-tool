@@ -78,7 +78,9 @@ fn load_or_recover_with(
             }
         }
         match raw {
-            Some(text) => match serde_json::from_str::<AppData>(&text) {
+            // strip 前导 BOM（评审 M13）：部分 Windows 编辑器以带 BOM 的 UTF-8
+            // 保存，serde_json 不接受 BOM——完好的 data.json 不能因此被判损坏隔离
+            Some(text) => match serde_json::from_str::<AppData>(text.trim_start_matches('\u{feff}')) {
                 Ok(d) => d,
                 Err(e) => {
                     // 内容确实损坏才隔离：改名保留现场，空数据继续运行。
@@ -220,9 +222,14 @@ impl Store {
             // 落盘后再改名，避免断电时 rename 出一个空壳文件
             f.sync_all().map_err(|e| format!("写入数据失败: {e}"))?;
         }
-        // 保留上一份完好数据；本次写入若在之后损坏，可手动改回恢复
+        // 保留上一份完好数据；本次写入若在之后损坏，可手动改回恢复。
+        // .bak 是兜底而非本次保存的一部分：复制失败（磁盘满/占用）不阻断
+        // data.json 本身的原子落盘，但必须留痕——静默吞掉会让恢复最后防线
+        // 在最需要它的磁盘故障场景下先失效且无人知晓（评审 M14）
         if self.path.exists() {
-            let _ = std::fs::copy(&self.path, self.path.with_extension("json.bak"));
+            if let Err(e) = std::fs::copy(&self.path, self.path.with_extension("json.bak")) {
+                eprintln!("[store] 备份 data.json.bak 失败（不影响本次保存）: {e}");
+            }
         }
         std::fs::rename(&tmp, &self.path).map_err(|e| format!("保存数据失败: {e}"))?;
         Ok(())
@@ -391,6 +398,65 @@ mod tests {
         assert_eq!(quarantined.len(), 1, "只应隔离出一个文件");
         let saved = std::fs::read_to_string(dir.path().join(&quarantined[0])).unwrap();
         assert_eq!(saved, bad, "隔离文件必须原样保留坏内容供抢救");
+    }
+
+    // 评审 M13：部分 Windows 编辑器默认以带 BOM 的 UTF-8 保存，serde_json
+    // 不接受 BOM——用户手工编辑保存后完好的 data.json 被判「损坏」隔离，
+    // 全部提示词「消失」。带 BOM 的合法 JSON 必须正常载入
+    #[test]
+    fn bom_prefixed_file_is_loaded_instead_of_quarantined() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut original = AppData::default();
+        original.prompts.push(stub_prompt("p1", "BOM 条目"));
+        let json = serde_json::to_string(&original).unwrap();
+        std::fs::write(dir.path().join("data.json"), format!("\u{feff}{json}")).unwrap();
+
+        let store = store_in(dir.path());
+        assert!(
+            store.recovered_notice.is_none(),
+            "带 BOM 的完好文件不算损坏: {:?}",
+            store.recovered_notice
+        );
+        assert_eq!(store.data.prompts.len(), 1, "数据必须正常载入");
+        assert!(
+            dir.path().join("data.json").exists(),
+            "不得隔离原文件"
+        );
+    }
+
+    // 评审 M14：.bak 复制失败（磁盘满/占用）此前被 let _ = 静默吞掉——恢复
+    // 最后防线在最需要它的磁盘故障场景下先失效且无提示。失败必须留痕，
+    // 但不得让本次保存失败（data.json 本身是完好的，rename 照常）
+    #[test]
+    fn save_survives_bak_copy_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store_in(dir.path());
+        store.data.prompts.push(stub_prompt("p1", "首条"));
+        store.save().unwrap();
+
+        // 让 .bak 复制必然失败：预置只读的 .bak 占位（Windows 上向只读文件复制返回拒绝访问）
+        let bak = dir.path().join("data.json.bak");
+        std::fs::write(&bak, "旧备份").unwrap();
+        let mut perms = std::fs::metadata(&bak).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&bak, perms).unwrap();
+
+        store.data.prompts.push(stub_prompt("p2", "次条"));
+        let result = store.save();
+        assert!(
+            result.is_ok(),
+            "data.json 完好时 .bak 失败不得阻断保存: {:?}",
+            result.err()
+        );
+        let saved: AppData =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("data.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved.prompts.len(), 2, "新数据必须已落盘");
+
+        // 恢复可写以便 tempdir 清理（Windows 删除只读文件会失败）
+        let mut p = std::fs::metadata(&bak).unwrap().permissions();
+        p.set_readonly(false);
+        let _ = std::fs::set_permissions(&bak, p);
     }
 
     // ---------- 评审 2026-09-10 C3：启动瞬态读失败必须只读保全 ----------
