@@ -524,10 +524,31 @@ fn apply_pull(local: &mut crate::models::AppData, remote: &SyncPayload, sync_cli
     crate::hotkey::sanitize_prompt_hotkeys(local);
 }
 
+/// 远端时间戳超前检测阈值（评审 I-4）：超过视为远端设备时钟明显偏差
+/// （虚拟机/未对时），LWW 比较不可靠——merge 报告附警告。最小防线：
+/// 可见性提示，不改合并行为（行为级修复需与同步协议 CAS 改造一并设计）
+const FUTURE_CLOCK_WARN_MS: u64 = 5 * 60 * 1000;
+
+/// 远端载荷中最大的「未来时间戳」超前量（毫秒）；0 = 无明显超前
+fn remote_future_skew(remote: &SyncPayload) -> u64 {
+    let ahead = |t: u64| t.saturating_sub(crate::models::now_ms());
+    remote
+        .prompts
+        .iter()
+        .map(|p| ahead(p.updated_at))
+        .chain(remote.clipboard.iter().map(|i| ahead(i.copied_at)))
+        .chain(remote.tombstones.iter().map(|t| ahead(t.at)))
+        .max()
+        .unwrap_or(0)
+}
+
 /// 条目级合并：内容按 updated_at 取新者；使用统计（use_count/last_used_at）
 /// 单调收敛取 max——它们的变化不 bump updated_at，不能参与 LWW，否则
 /// 一端的使用计数永远传不到另一端，且会被另一端的内容编辑整体覆盖。
-fn merge(local: &mut crate::models::AppData, remote: &SyncPayload) -> (u64, u64, u64) {
+/// sync_clipboard=false 时云端剪贴板不并入本地（评审 I-1）：作用域作为
+/// 只读参数传入，remote 保持不可变——调用方上传时还要用它带回云端副本
+fn merge(local: &mut crate::models::AppData, remote: &SyncPayload, sync_clipboard: bool) -> (u64, u64, u64) {
+    use std::collections::HashMap;
     let mut added: u64 = 0;
     let mut updated: u64 = 0;
 
@@ -535,13 +556,23 @@ fn merge(local: &mut crate::models::AppData, remote: &SyncPayload) -> (u64, u64,
         local.ensure_category(c);
     }
 
+    // 按 id 索引（评审 M5）：远端条目对本地列表线性 find 在万条级是 O(n²)，
+    // 且全部在全局 Store 锁内执行——15s 一轮的自动同步会周期性冻结热键与监听
+    let mut prompt_pos: HashMap<String, usize> = local
+        .prompts
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.id.clone(), i))
+        .collect();
     for rp in &remote.prompts {
-        match local.prompts.iter_mut().find(|p| p.id == rp.id) {
+        match prompt_pos.get(&rp.id).copied() {
             None => {
+                prompt_pos.insert(rp.id.clone(), local.prompts.len());
                 local.prompts.push(rp.clone());
                 added += 1;
             }
-            Some(lp) => {
+            Some(i) => {
+                let lp = &mut local.prompts[i];
                 if rp.updated_at > lp.updated_at {
                     let use_count = lp.use_count.max(rp.use_count);
                     let last_used_at = lp.last_used_at.max(rp.last_used_at);
@@ -557,52 +588,76 @@ fn merge(local: &mut crate::models::AppData, remote: &SyncPayload) -> (u64, u64,
         }
     }
 
-    for ri in &remote.clipboard {
-        // 防御（评审 2026-09-10 M7#5）：上传侧已过滤图片条目，但云端可能残留
-        // 旧版本数据或被外部修改；并入引用本机不存在文件的图片条目会成为
-        // 永久裂图，且 GC 对账会视其为"有引用"而永不清理
-        if ri.is_image() {
-            continue;
-        }
-        match local.clipboard.iter_mut().find(|i| i.id == ri.id) {
-            None => {
-                local.clipboard.push(ri.clone());
-                added += 1;
+    if sync_clipboard {
+        let mut clip_pos: HashMap<String, usize> = local
+            .clipboard
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.id.clone(), i))
+            .collect();
+        for ri in &remote.clipboard {
+            // 防御（评审 2026-09-10 M7#5）：上传侧已过滤图片条目，但云端可能残留
+            // 旧版本数据或被外部修改；并入引用本机不存在文件的图片条目会成为
+            // 永久裂图，且 GC 对账会视其为"有引用"而永不清理
+            if ri.is_image() {
+                continue;
             }
-            Some(li) => {
-                if ri.copied_at > li.copied_at {
-                    *li = ri.clone();
+            match clip_pos.get(&ri.id).copied() {
+                None => {
+                    clip_pos.insert(ri.id.clone(), local.clipboard.len());
+                    local.clipboard.push(ri.clone());
+                    added += 1;
+                }
+                Some(i) => {
+                    let li = &mut local.clipboard[i];
+                    if ri.copied_at > li.copied_at {
+                        *li = ri.clone();
+                    }
                 }
             }
         }
     }
 
+    let mut tomb_pos: HashMap<String, usize> = local
+        .tombstones
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (t.id.clone(), i))
+        .collect();
     for rt in &remote.tombstones {
-        match local.tombstones.iter_mut().find(|t| t.id == rt.id) {
-            None => local.tombstones.push(rt.clone()),
-            Some(lt) => lt.at = lt.at.max(rt.at),
+        match tomb_pos.get(&rt.id).copied() {
+            None => {
+                tomb_pos.insert(rt.id.clone(), local.tombstones.len());
+                local.tombstones.push(rt.clone());
+            }
+            Some(i) => local.tombstones[i].at = local.tombstones[i].at.max(rt.at),
         }
     }
 
+    // 墓碑按 id 聚合 max(at) 后统一判删（评审 M5：retain × tombstones 的
+    // 嵌套线性扫描同样随规模放大成 O(n²)）
+    let mut tomb_max: HashMap<String, u64> = HashMap::with_capacity(local.tombstones.len());
+    for t in &local.tombstones {
+        tomb_max
+            .entry(t.id.clone())
+            .and_modify(|a| *a = (*a).max(t.at))
+            .or_insert(t.at);
+    }
     let before = local.prompts.len() + local.clipboard.len();
-    let tombstones = local.tombstones.clone();
     local
         .prompts
-        .retain(|p| !tombstones.iter().any(|t| t.id == p.id && t.at > p.updated_at));
+        .retain(|p| tomb_max.get(&p.id).map_or(true, |&at| at <= p.updated_at));
     local
         .clipboard
-        .retain(|i| !tombstones.iter().any(|t| t.id == i.id && t.at > i.copied_at));
+        .retain(|i| tomb_max.get(&i.id).map_or(true, |&at| at <= i.copied_at));
     let removed = (before - (local.prompts.len() + local.clipboard.len())) as u64;
 
-    // 双端剪贴板做并集可能突破上限，收敛到统一上限（保留最新）
-    if local.clipboard.len() > crate::models::MAX_CLIPBOARD_ITEMS {
-        local
-            .clipboard
-            .sort_by_key(|i| std::cmp::Reverse(i.copied_at));
-        local
-            .clipboard
-            .truncate(crate::models::MAX_CLIPBOARD_ITEMS);
-    }
+    // 统一按 copied_at 降序（评审 M2）：并入的云端条目此前 push 尾部不排序
+    //（仅超上限才排），历史时间序错乱——对齐 apply_pull 的口径
+    local
+        .clipboard
+        .sort_by_key(|i| std::cmp::Reverse(i.copied_at));
+    local.clipboard.truncate(crate::models::MAX_CLIPBOARD_ITEMS);
 
     (added, updated, removed)
 }
@@ -633,7 +688,11 @@ fn stamp_last_sync(
 ) -> Result<(), String> {
     if result.is_ok() {
         store.data.settings.last_sync_at = Some(crate::models::now_ms() as i64);
-        store.save()?;
+        // 盖章落盘失败不得把已成功的同步翻转成 Err（评审 M4）：云端已更新，
+        // 误报「同步失败」会丢失 SyncReport 统计；内存时间戳保留下轮落盘补上
+        if let Err(e) = store.save() {
+            eprintln!("[sync] 同步成功但记录 lastSyncAt 落盘失败: {e}");
+        }
     }
     Ok(())
 }
@@ -696,23 +755,31 @@ fn run_sync_inner(app: &AppHandle, direction: &str) -> Result<SyncReport, String
         // 显式列出 merge（评审 2026-09-10 M7#13）：未知 direction 走末尾
         // 报错分支而非静默回落——静默降级会掩盖前端的拼写错误
         "merge" => {
-            let mut remote = backend.fetch()?;
-            // 用户关闭剪贴板同步时，不把云端剪贴板合并进本地
-            if let Some(r) = &mut remote {
-                if !sync_clipboard {
-                    r.clipboard.clear();
-                }
-            }
+            let remote = backend.fetch()?;
+            // remote 全程不可变（评审 I-1）：关闭剪贴板同步时 merge 按参数
+            // 跳过云端剪贴板的并入，但上传侧仍要用原始 remote 把云端副本
+            // 带回——此前在 merge 前 clear() remote 再传给 apply_clipboard_scope，
+            // 会把空数组当「云端既有内容」上传，静默清空云端剪贴板副本
             let (added, updated, removed, detail) = match &remote {
                 Some(r) => {
                     let mut store = lock(app);
-                    let (a, u, rm) = merge(&mut store.data, r);
+                    let (a, u, rm) = merge(&mut store.data, r, sync_clipboard);
                     hotkey::sanitize_prompt_hotkeys(&mut store.data);
                     // 合并结果先落盘：后续上传失败时内存与磁盘保持一致，
                     // 直接退出也不会丢掉已合并的数据（云端未更新则下次
                     // 同步重传，merge 幂等）
                     store.save()?;
-                    (a, u, rm, format!("新增 {a} 条，更新 {u} 条，删除 {rm} 条"))
+                    let mut detail = format!("新增 {a} 条，更新 {u} 条，删除 {rm} 条");
+                    // 远端时钟超前警告（评审 I-4 最小防线）：LWW 完全押在
+                    // 时间戳可比性上，偏差明显时提示用户核对设备时钟
+                    let skew = remote_future_skew(r);
+                    if skew > FUTURE_CLOCK_WARN_MS {
+                        detail.push_str(&format!(
+                            "；警告：远端数据时间戳超前约 {} 分钟，设备时钟可能不准，时间戳比较或不可靠",
+                            skew / 60_000
+                        ));
+                    }
+                    (a, u, rm, detail)
                 }
                 None => (0, 0, 0, "云端暂无数据，已上传本机数据".to_string()),
             };
@@ -934,7 +1001,7 @@ mod tests {
             vec![],
             vec![],
         );
-        let (added, updated, removed) = merge(&mut local, &remote);
+        let (added, updated, removed) = merge(&mut local, &remote, true);
         assert_eq!((added, updated, removed), (1, 0, 0));
         assert_eq!(local.prompts[0].content, "远端正文");
         assert!(local.categories.contains(&"新分类".to_string()));
@@ -1012,7 +1079,7 @@ mod tests {
         let mut local = AppData::default();
         local.prompts.push(prompt("l1", "本地独有", 100, 0, 0));
         let remote = payload(vec![], vec![], vec![], vec![]);
-        let report = merge(&mut local, &remote);
+        let report = merge(&mut local, &remote, true);
         assert_eq!(report, (0, 0, 0));
         assert_eq!(local.prompts.len(), 1);
         assert_eq!(local.prompts[0].content, "本地独有");
@@ -1026,7 +1093,7 @@ mod tests {
         // 远端：更新的编辑，但使用统计低
         let remote = payload(vec![], vec![prompt("p1", "新内容", 200, 2, 100)], vec![], vec![]);
 
-        let (added, updated, removed) = merge(&mut local, &remote);
+        let (added, updated, removed) = merge(&mut local, &remote, true);
         assert_eq!((added, updated, removed), (0, 1, 0));
         assert_eq!(local.prompts[0].content, "新内容", "远端更新时间新，内容应取胜");
         assert_eq!(local.prompts[0].use_count, 5, "使用计数必须单调收敛取 max");
@@ -1039,7 +1106,7 @@ mod tests {
         local.prompts.push(prompt("p1", "本地新内容", 200, 1, 0));
         let remote = payload(vec![], vec![prompt("p1", "远端旧内容", 100, 7, 555)], vec![], vec![]);
 
-        let (added, updated, _) = merge(&mut local, &remote);
+        let (added, updated, _) = merge(&mut local, &remote, true);
         assert_eq!((added, updated), (0, 0), "本机较新不算更新");
         assert_eq!(local.prompts[0].content, "本地新内容");
         assert_eq!(local.prompts[0].use_count, 7, "远端更高的使用计数要被吸收");
@@ -1058,7 +1125,7 @@ mod tests {
             vec![],
             vec![Tombstone { id: "p1".into(), at: 200 }, Tombstone { id: "c1".into(), at: 150 }],
         );
-        let (_, _, removed) = merge(&mut local, &remote);
+        let (_, _, removed) = merge(&mut local, &remote, true);
         assert_eq!(removed, 2);
         assert!(local.prompts.iter().all(|p| p.id != "p1"));
         assert!(local.clipboard.iter().all(|i| i.id != "c1"));
@@ -1071,7 +1138,7 @@ mod tests {
         // 删除之后又在另一端编辑过（updated_at 晚于墓碑）：复活保留
         local.prompts.push(prompt("p1", "删除后又编辑", 300, 0, 0));
         let remote = payload(vec![], vec![], vec![], vec![Tombstone { id: "p1".into(), at: 200 }]);
-        let (_, _, removed) = merge(&mut local, &remote);
+        let (_, _, removed) = merge(&mut local, &remote, true);
         assert_eq!(removed, 0);
         assert_eq!(local.prompts.len(), 1);
     }
@@ -1086,7 +1153,7 @@ mod tests {
         local.tombstones.push(Tombstone { id: "c1".into(), at: 500 });
         // 远端也带着 clear 上传的墓碑回来
         let remote = payload(vec![], vec![], vec![], vec![Tombstone { id: "c1".into(), at: 500 }]);
-        let (_, _, removed) = merge(&mut local, &remote);
+        let (_, _, removed) = merge(&mut local, &remote, true);
         assert_eq!(removed, 0, "copied_at 晚于墓碑 at 的恢复条目不得被重删");
         assert_eq!(local.clipboard.len(), 1);
         assert_eq!(local.clipboard[0].content, "恢复的条目");
@@ -1097,13 +1164,13 @@ mod tests {
         let mut local = AppData::default();
         local.clipboard.push(text_clip("c1", "本地旧", 100));
         let remote = payload(vec![], vec![], vec![text_clip("c1", "远端新", 200)], vec![]);
-        merge(&mut local, &remote);
+        merge(&mut local, &remote, true);
         assert_eq!(local.clipboard[0].content, "远端新");
 
         let mut local2 = AppData::default();
         local2.clipboard.push(text_clip("c1", "本地新", 200));
         let remote2 = payload(vec![], vec![], vec![text_clip("c1", "远端旧", 100)], vec![]);
-        merge(&mut local2, &remote2);
+        merge(&mut local2, &remote2, true);
         assert_eq!(local2.clipboard[0].content, "本地新");
     }
 
@@ -1118,7 +1185,7 @@ mod tests {
             .collect();
         let remote = payload(vec![], vec![], remote_clips, vec![]);
 
-        let (added, _, removed) = merge(&mut local, &remote);
+        let (added, _, removed) = merge(&mut local, &remote, true);
         assert_eq!(added, 600, "远端 600 条全部计入新增");
         assert_eq!(removed, 0, "超限截断不计入墓碑删除");
         assert_eq!(local.clipboard.len(), MAX_CLIPBOARD_ITEMS);
@@ -1133,7 +1200,7 @@ mod tests {
         let mut local = AppData::default();
         local.prompts.push(prompt("p1", "保持", 1, 0, 0));
         let before_len = local.prompts.len();
-        let report = merge(&mut local, &payload(vec![], vec![], vec![], vec![]));
+        let report = merge(&mut local, &payload(vec![], vec![], vec![], vec![]), true);
         assert_eq!(report, (0, 0, 0));
         assert_eq!(local.prompts.len(), before_len);
         // settings 不在同步载荷内，绝不能被 merge 触碰
@@ -1238,7 +1305,92 @@ mod tests {
         );
     }
 
+    // 评审 M4：同步本体成功后，收尾盖章落盘失败不得把成功翻转成 Err——
+    // 云端已更新，误报「同步失败」且丢失 SyncReport 统计
+    #[test]
+    fn stamp_last_sync_save_failure_keeps_success_result() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = crate::store::Store::test_store(dir.path());
+        store.read_only = true; // 迫使 save() 失败（磁盘满等价的失败注入）
+
+        let ok = Ok(SyncReport {
+            added: 1,
+            updated: 2,
+            removed: 0,
+            message: "同步完成".into(),
+        });
+        stamp_last_sync(&mut store, &ok)
+            .expect("盖章失败不得翻转同步成功的结果");
+        assert!(
+            store.data.settings.last_sync_at.is_some(),
+            "内存时间戳仍应更新，下次成功落盘时补上"
+        );
+    }
+
     // ---------- 上传侧剪贴板范围语义（评审 I11 回归守卫） ----------
+
+    // 评审 I-1：merge 分支曾先 clear() remote 再把它传给上传侧的
+    // apply_clipboard_scope——关闭剪贴板同步的 merge 会把空数组当「云端既有
+    // 内容」上传，静默清空云端剪贴板副本。merge 改为按参数跳过并入，
+    // remote 保持不可变，上传侧照常带回云端副本
+    #[test]
+    fn merge_out_of_scope_clipboard_keeps_remote_intact_for_upload() {
+        let mut local = AppData::default();
+        local.clipboard.push(text_clip("l1", "本地私有", 300));
+        let remote = payload(vec![], vec![], vec![text_clip("c1", "云端剪贴", 1)], vec![]);
+
+        merge(&mut local, &remote, false);
+        assert_eq!(local.clipboard.len(), 1, "关闭开关时云端剪贴板不得并入本地");
+        assert_eq!(local.clipboard[0].id, "l1");
+
+        // 上传阶段：remote 未被破坏，照常带回云端副本（I11 对称保护）
+        let mut upload = SyncPayload::from(&local);
+        apply_clipboard_scope(&mut upload, Some(&remote), false);
+        assert_eq!(upload.clipboard.len(), 1, "上传载荷必须保留云端剪贴板副本");
+        assert_eq!(upload.clipboard[0].id, "c1");
+    }
+
+    // 评审 M2：merge 并入的云端条目此前 push 尾部不排序（仅超上限才排），
+    // 历史时间序错乱；统一对齐 apply_pull 的 copied_at 降序口径
+    #[test]
+    fn merge_keeps_clipboard_sorted_by_copied_at_desc() {
+        let mut local = AppData::default();
+        local.clipboard.push(text_clip("l1", "本地较旧", 100));
+        let remote = payload(vec![], vec![], vec![text_clip("r1", "云端较新", 200)], vec![]);
+
+        merge(&mut local, &remote, true);
+        assert_eq!(local.clipboard.len(), 2);
+        assert_eq!(local.clipboard[0].id, "r1", "较新的云端条目必须排在前面");
+        assert_eq!(local.clipboard[1].id, "l1");
+    }
+
+    // 评审 I-4：远端设备时钟超前（虚拟机/未对时）时 LWW 比较不可靠，
+    // merge 报告须附警告（最小防线：可见性提示）
+    #[test]
+    fn remote_future_skew_reported_when_clock_ahead() {
+        let now = crate::models::now_ms();
+        let ahead = payload(
+            vec![],
+            vec![prompt("p1", "未来时间戳", now + 10 * 60 * 1000, 0, 0)],
+            vec![],
+            vec![],
+        );
+        assert!(
+            remote_future_skew(&ahead) >= 10 * 60 * 1000 - 60_000,
+            "超前 10 分钟必须检出（留 1 分钟的执行耗时余量）"
+        );
+
+        let normal = payload(vec![], vec![prompt("p1", "正常", now, 0, 0)], vec![], vec![]);
+        assert_eq!(remote_future_skew(&normal), 0, "正常时钟不得误报");
+
+        let clip_ahead = payload(
+            vec![],
+            vec![],
+            vec![text_clip("c1", "未来剪贴", now + 30 * 60 * 1000)],
+            vec![],
+        );
+        assert!(remote_future_skew(&clip_ahead) > 0, "剪贴板时间戳同理检出");
+    }
 
     #[test]
     fn clipboard_out_of_scope_preserves_remote_clipboard_on_upload() {
