@@ -23,12 +23,13 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "shots": "playwright test shots.spec.ts --grep-invert=__never__",
     "test:e2e": "playwright test",
     "build:debug": "pnpm build && tauri build --debug --no-bundle",
     "test:e2e:fullstack": "pnpm build:debug && node --test e2e-webdriver/smoke.test.mjs"
@@ -44,7 +45,7 @@
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@tauri-apps/cli": "^2",
-    "@types/node": "^26.4.0",
+    "@types/node": "^20.14.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vue/test-utils": "^2.5.0",
     "happy-dom": "^20.12.0",

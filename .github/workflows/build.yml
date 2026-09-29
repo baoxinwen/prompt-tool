@@ -47,7 +47,9 @@ jobs:
         run: pnpm test:e2e
 
       - name: Rust 单元与集成测试（cargo test）
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        # --locked 与前端 --frozen-lockfile 纪律对称（评审 M25）：lock 与
+        # manifest 失配时失败而非静默重解析
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
       - name: 类型检查与构建（vue-tsc + vite build）
         run: pnpm build
@@ -110,6 +112,14 @@ jobs:
           else
             NOTES_ARGS=(--notes "Prompt Tool $GITHUB_REF_NAME")
           fi
+          # 预发布 tag（版本号含 -，如 v1.2.0-rc.1）创建的 Release 必须标记
+          # --prerelease（评审 I-12）：此前引用了未定义的 $PRERELEASE_FLAG，
+          # bash 展开为空，rc Release 会被 GitHub 标为 Latest，破坏
+          # releases/latest 的正式版隔离（README 对正式版用户的更新承诺依赖它）
+          PRERELEASE_FLAG=""
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
           gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"               --title "$GITHUB_REF_NAME"               "${NOTES_ARGS[@]}"               $PRERELEASE_FLAG
 
       # 构建 Windows NSIS 安装包；打 v* 标签推送时产物附加到 Release，
@@ -126,3 +136,5 @@ jobs:
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           includeUpdaterJson: ${{ !contains(github.ref_name, '-') }}
+          # 与 cargo test --locked 同口径（评审 M25）：构建产物必须来自提交的 Cargo.lock
+          args: --locked

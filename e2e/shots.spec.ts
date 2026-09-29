@@ -75,7 +75,9 @@ async function open(page: Page, label: string) {
   await page.goto("/");
 }
 
-test.describe("风格前后对比截图", () => {
+// @shots 标记：纯截图工具用例（无断言），CI 默认跳过、本地显式跑
+//（评审 M27）——此前混在全量套件里每次 push 空耗时长
+test.describe("风格前后对比截图", { tag: "@shots" }, () => {
   test("管理窗口全页面", async ({ page }) => {
     test.setTimeout(60_000);
     await page.setViewportSize({ width: 1040, height: 700 });
