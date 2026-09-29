@@ -27,7 +27,7 @@ pnpm tauri dev     # 开发模式
 pnpm tauri build   # 产出安装包（src-tauri/target/release/bundle/nsis/）
 ```
 
-依赖：Node 18+、Rust。
+依赖：Node 20+、Rust。
 
 - Windows：需 MSVC 工具链与 VS Build Tools，安装包产出在 `src-tauri/target/release/bundle/nsis/`
 
@@ -40,7 +40,7 @@ pnpm tauri build   # 产出安装包（src-tauri/target/release/bundle/nsis/）
 - 设置 →「关于与更新」可手动检查更新；默认开启「自动检查更新」（启动后异步检查，可在设置中关闭）
 - 发现新版本后可在应用内下载并一键安装（更新包经 minisign 签名校验）；Windows 全自动
 - Windows 升级为 perMachine 安装，更新时系统会弹一次 UAC 确认（passive 模式）
-- 更新源为 GitHub Releases（`latest.json`），直连失败自动尝试公共镜像 **ghfast.top**（第三方反向代理，其可窥见你的 IP 与版本信息；更新包始终经 minisign 签名校验，内容无法被该代理篡改）；预发布版本（tag 含 `-`）不会推送给正式版用户
+- 更新源为 GitHub Releases（`latest.json`），直连失败自动尝试公共镜像 **ghfast.top**（第三方反向代理，其可窥见你的 IP 与版本信息；更新包始终经 minisign 签名校验，镜像无法推送未签名的恶意更新包，但**无法排除签名包回滚**——镜像方若作恶或被攻破，可用旧版本号搭配官方旧签名包把你回滚到含已知弱点的历史版本，信任前提是镜像自身不作恶）；预发布版本（tag 含 `-`）不会推送给正式版用户
 - 检查更新仅匿名 GET 请求，不上传任何用户数据
 
 > 本地开发注意：开启 `createUpdaterArtifacts` 后，本地 `pnpm tauri build` 需要设置
