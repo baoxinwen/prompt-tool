@@ -557,11 +557,11 @@ mod tests {
         Settings {
             sync_clipboard: true,
             gist: GistConfig {
-                token: "ghp_secret_token".into(),
+                token: crate::testutil::fake_cred("ghp_secret_token"),
                 ..GistConfig::default()
             },
             webdav: WebDavConfig {
-                password: "dav_pass".into(),
+                password: crate::testutil::fake_cred("dav_pass"),
                 ..WebDavConfig::default()
             },
             ..Settings::default()

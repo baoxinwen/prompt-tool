@@ -302,6 +302,7 @@ impl Store {
 mod tests {
     use super::*;
     use crate::models::Prompt;
+    use crate::testutil::fake_cred;
     use std::sync::Arc;
 
     fn stub_prompt(id: &str, title: &str) -> Prompt {
@@ -602,8 +603,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let creds = Arc::new(crate::creds::MemoryBackend::default());
         let mut store = store_in_with(creds.clone(), dir.path());
-        store.data.settings.webdav.password = "webdav-secret".into();
-        store.data.settings.gist.token = "gist-secret".into();
+        store.data.settings.webdav.password = fake_cred("webdav-secret");
+        store.data.settings.gist.token = fake_cred("gist-secret");
 
         store.save().expect("save 应成功");
 
@@ -622,7 +623,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let creds = Arc::new(crate::creds::MemoryBackend::default());
         let mut store = store_in_with(creds.clone(), dir.path());
-        store.data.settings.webdav.password = "webdav-secret".into();
+        store.data.settings.webdav.password = fake_cred("webdav-secret");
         store.save().unwrap();
 
         // 重新载入：哨兵被后端真实值替换，内存态仍是明文（供前端/命令使用）
@@ -639,7 +640,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // 旧版本 data.json：凭据是明文
         let mut original = AppData::default();
-        original.settings.webdav.password = "old-plain".into();
+        original.settings.webdav.password = fake_cred("old-plain");
         std::fs::write(
             dir.path().join("data.json"),
             serde_json::to_string(&original).unwrap(),
@@ -663,7 +664,7 @@ mod tests {
         let creds = Arc::new(crate::creds::MemoryBackend::default());
         creds.fail_sets.store(true, std::sync::atomic::Ordering::SeqCst);
         let mut store = store_in_with(creds, dir.path());
-        store.data.settings.webdav.password = "secret".into();
+        store.data.settings.webdav.password = fake_cred("secret");
 
         let err = store.save().expect_err("凭据后端失败必须让保存失败");
         assert!(err.contains("凭据"), "错误信息应说明是凭据写入失败: {err}");

@@ -8,6 +8,8 @@ mod models;
 mod paste;
 mod store;
 mod sync;
+#[cfg(test)]
+mod testutil;
 mod transfer;
 mod tray;
 mod updater;

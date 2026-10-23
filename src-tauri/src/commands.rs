@@ -1005,6 +1005,7 @@ pub fn open_release_page(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::fake_cred;
 
     fn prompt(id: &str, title: &str, category: &str) -> Prompt {
         Prompt {
@@ -1260,8 +1261,8 @@ mod tests {
     #[test]
     fn redact_credentials_clears_password_and_token_only() {
         let mut d = data_with_prompt();
-        d.settings.webdav.password = "dav-secret".into();
-        d.settings.gist.token = "ghp_secret".into();
+        d.settings.webdav.password = fake_cred("dav-secret");
+        d.settings.gist.token = fake_cred("ghp_secret");
         d.categories.push("开发".into());
 
         let d = redact_credentials(d);

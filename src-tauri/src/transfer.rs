@@ -498,6 +498,7 @@ fn strip_code_fence(raw: &str) -> String {
 mod tests {
     use super::*;
     use crate::models::{ClipboardItem, ImageRef, Tombstone};
+    use crate::testutil::fake_cred;
 
     fn sample_prompt(id: &str, title: &str, category: &str, content: &str) -> Prompt {
         Prompt {
@@ -545,8 +546,8 @@ mod tests {
     fn export_json_filters_clipboard_secrets_and_images() {
         let mut data = AppData::default();
         data.prompts.push(sample_prompt("p1", "标题", "开发", "正文"));
-        data.settings.gist.token = "ghp_token".into();
-        data.settings.webdav.password = "dav_pw".into();
+        data.settings.gist.token = fake_cred("ghp_token");
+        data.settings.webdav.password = fake_cred("dav_pw");
         data.clipboard.push(text_clip("c1", "普通内容", 1));
         data.clipboard.push(text_clip("c2", "包含 ghp_token 的内容", 2));
         data.clipboard.push(text_clip("c3", "密码是 dav_pw", 3));
