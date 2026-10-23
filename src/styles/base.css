@@ -23,6 +23,15 @@ body {
   overflow: hidden;
   user-select: none;
   -webkit-font-smoothing: antialiased;
+  /* 数字防抖（铁律 6）：全站数字锁等宽，计数/时间跳动不再抖列 */
+  font-variant-numeric: tabular-nums;
+  /* 防孤字（铁律 8）：正文段落避免行尾悬挂单字 */
+  text-wrap: pretty;
+}
+
+/* 行内图标（铁律 5）：基线系到字形中线，与文字视觉居中 */
+svg {
+  vertical-align: -0.125em;
 }
 
 #app {
@@ -56,7 +65,8 @@ button {
   color: inherit;
 }
 
-/* ---------- 表单控件：凹槽井（recessed well，靠内阴影下压而非改色） ---------- */
+/* ---------- 表单控件：凹槽井（recessed well，靠内阴影下压而非改色） ----------
+   铁律 1：静态不加边框，井的身份由底色差 + 内阴影表达 */
 
 input[type='text'],
 input[type='password'],
@@ -64,13 +74,13 @@ input[type='search'],
 textarea,
 select {
   background: var(--input-bg);
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--r-key);
   padding: 8px 11px;
   outline: none;
   color: var(--text);
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
-  transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+  transition: background var(--t-fast), box-shadow var(--t-fast);
   user-select: text;
 }
 
@@ -79,12 +89,14 @@ textarea::placeholder {
   color: var(--faint);
 }
 
+/* 聚焦（铁律 2）：不加 outline，加深双环 box-shadow 造咬合感——
+   内环 1px 贴边、外环 4px 晕开 */
 input:focus,
 textarea:focus,
 select:focus {
-  border-color: var(--brand);
   background: var(--input-focus-bg);
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.03), 0 0 0 3px var(--brand-soft);
+  box-shadow: inset 0 0 0 1px var(--ring), inset 0 2px 4px rgba(0, 0, 0, 0.03),
+    0 0 0 4px var(--brand-soft-2);
 }
 
 textarea {
@@ -96,10 +108,11 @@ select {
   cursor: pointer;
 }
 
-/* ---------- 按钮：纸面实体键（浮起 → 悬停上浮 → 按下内陷） ---------- */
+/* ---------- 按钮：纸面实体键（浮起 → 悬停上浮 → 按下内陷） ----------
+   铁律 1：键身不加边框，厚度与轮廓交给底部硬边投影 + 顶部高光 */
 
 button {
-  border: 1px solid var(--border);
+  border: none;
   background: linear-gradient(180deg, var(--key-1) 0%, var(--key-2) 100%);
   border-radius: var(--r-key);
   padding: 6px 14px;
@@ -107,7 +120,7 @@ button {
   color: var(--text);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1.5px 0 var(--edge),
     0 2px 4px rgba(17, 17, 17, 0.06);
-  transition: transform var(--t-spring), background var(--t-fast), border-color var(--t-fast),
+  transition: transform var(--t-spring), background var(--t-fast),
     box-shadow var(--t-spring), color var(--t-fast);
   white-space: nowrap;
   display: inline-flex;
@@ -118,7 +131,6 @@ button {
 
 button:hover {
   background: linear-gradient(180deg, var(--key-1) 0%, var(--key-2) 100%);
-  border-color: var(--border-strong);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 1.5px 0 var(--edge-strong),
     0 4px 10px rgba(17, 17, 17, 0.1);
   transform: translateY(-1px);
@@ -132,9 +144,8 @@ button:active {
 /* 主操作：全应用唯一的黑键（亮色=石墨黑，暗色=白键反白） */
 button.primary {
   background: linear-gradient(180deg, var(--brand-btn) 0%, var(--brand-strong) 100%);
-  border: 1px solid var(--edge-strong);
   color: var(--on-brand);
-  font-weight: 600;
+  font-weight: var(--fw-600);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 1.5px 0 var(--edge-strong),
     0 2px 6px rgba(17, 17, 17, 0.2);
 }
@@ -155,19 +166,16 @@ button.danger {
 }
 
 button.danger:hover {
-  border-color: var(--danger-btn);
   background: var(--danger-soft);
 }
 
 button.ghost {
-  border-color: transparent;
   background: transparent;
   box-shadow: none;
 }
 
 button.ghost:hover {
   background: var(--panel-2);
-  border-color: var(--border);
   transform: none;
 }
 
@@ -180,7 +188,6 @@ button:disabled {
   opacity: 1;
   background: var(--panel-2);
   color: var(--muted);
-  border-color: var(--border);
   box-shadow: none;
   transform: none;
   cursor: default;
@@ -210,20 +217,18 @@ button:disabled {
   cursor: pointer;
 }
 
-/* 键盘聚焦时焦点环打在轨道上（input 本身 opacity:0） */
+/* 键盘聚焦时焦点环打在轨道上（input 本身 opacity:0）：双环 box-shadow，不加 outline */
 .switch input:focus-visible + .track {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+  box-shadow: inset 0 0 0 1px var(--ring), 0 0 0 4px var(--brand-soft-2);
 }
 
 .switch .track {
   position: absolute;
   inset: 0;
   background: var(--panel-3);
-  border: 1px solid var(--border-strong);
   border-radius: 999px;
   box-shadow: inset 0 2px 3px rgba(17, 17, 17, 0.08);
-  transition: background var(--t-med), border-color var(--t-med);
+  transition: background var(--t-med);
 }
 
 .switch .thumb {
@@ -240,7 +245,6 @@ button:disabled {
 
 .switch input:checked + .track {
   background: var(--brand-btn);
-  border-color: transparent;
 }
 
 .switch input:checked + .track .thumb {
@@ -273,31 +277,64 @@ button:disabled {
   font-family: var(--font-mono);
 }
 
-/* 键帽：全站签名元素——仪器面板上的实体按键 */
+/* 键帽：全站签名元素——仪器面板上的实体按键（铁律 1：键身无边框，厚度用投影） */
 kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 20px;
   padding: 2.5px 6px;
-  border: 1px solid var(--border-strong);
-  border-bottom-width: 2px;
   border-radius: 6px;
   background: var(--kbd-bg);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 2px 0 var(--edge);
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   color: var(--text-2);
   line-height: 1.3;
 }
 
-/* 卡片：纸面浮起 */
+/* 卡片：纸面浮起（铁律 1：无边框，靠与画布的明度差分层） */
 .card {
   background: var(--panel);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   box-shadow: 0 1.5px 0 var(--edge), 0 2px 6px rgba(17, 17, 17, 0.05);
+}
+
+/* ---------- 丝滑折叠（铁律 7）：grid 0fr→1fr 过渡，免 JS 算高 ---------- */
+
+.fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 240ms var(--ease);
+}
+
+.fold.open {
+  grid-template-rows: 1fr;
+}
+
+.fold > * {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ---------- 复制对勾（铁律 10 + 9）：弹入欠阻尼微弹，自熄前淡出 ---------- */
+
+.cpfade-enter-active {
+  transition: opacity 140ms var(--ease), transform 240ms var(--ease-spring);
+}
+
+.cpfade-enter-from {
+  opacity: 0;
+  transform: scale(0.6);
+}
+
+.cpfade-leave-active {
+  transition: opacity 220ms var(--ease);
+}
+
+.cpfade-leave-to {
+  opacity: 0;
 }
 
 /* ---------- 骨架屏（加载表现） ----------
@@ -337,7 +374,6 @@ kbd {
   bottom: 40px;
   transform: translateX(-50%);
   background: var(--brand-btn);
-  border: 1px solid var(--edge-strong);
   color: var(--on-brand);
   padding: 9px 18px;
   border-radius: var(--r-key);
@@ -375,11 +411,11 @@ kbd {
 }
 
 .toast.err {
-  border-color: var(--danger-btn);
+  box-shadow: 0 0 0 1px var(--danger-btn), var(--shadow-brand);
 }
 
 .toast.ok {
-  border-color: var(--edge-strong);
+  box-shadow: var(--shadow-brand);
 }
 
 /* ---------- 滚动条 ---------- */
@@ -497,6 +533,6 @@ kbd {
 /* 品牌名/标题 display 处理：丝印声部——等宽、加宽字距，仪器铭牌 */
 .display {
   font-family: var(--font-display);
-  font-weight: 600;
+  font-weight: var(--fw-600);
   letter-spacing: 0.08em;
 }
