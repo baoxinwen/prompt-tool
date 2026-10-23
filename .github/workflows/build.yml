@@ -136,5 +136,8 @@ jobs:
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           includeUpdaterJson: ${{ !contains(github.ref_name, '-') }}
-          # 与 cargo test --locked 同口径（评审 M25）：构建产物必须来自提交的 Cargo.lock
-          args: --locked
+          # 锁文件一致性（评审 M25）由 test 门禁的 `cargo test --locked` 在同一
+          # commit SHA 上先行保证（needs: [test]），构建步不再重复传参——
+          # tauri-action 检出 package.json 的 tauri 脚本后经
+          # `pnpm tauri build --locked` 直传，会被 pnpm 10 以 unexpected
+          # argument 拒绝（2026-10-23 首跑 CI 实证）
