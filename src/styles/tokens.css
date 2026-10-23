@@ -4,42 +4,47 @@
    纯中性灰阶（零色相）· 黑即品牌（浮起黑键=主操作，按住=选中）
    · 实体键光影物理（顶部高光+硬底边+按压内陷）· 丝印等宽铭牌层
    状态色（同步绿/危险红/琥珀）仅作功能指示，不做装饰
+   「大厂质感」十条铁律（2026-10-23 定为配色与交互基线）：表面禁纯黑 #000、
+   靠 1%–3% 微明度分层（浅 #f5f5f3/#fcfcfb · 暗 #0b0b0a/#151515/#1a1a19/#20201e）、
+   聚焦不加 outline 用加深双环 box-shadow、暗色字重整体 -40、数字 tabular-nums、
+   折叠走 grid 0fr→1fr、拖拽过阻尼簧(1200/80)零回弹 / 反馈欠阻尼簧(380/18)微弹
    分层：primitive（原料值）→ semantic（语义别名，组件只用这层）→ component（组件级派生）
    深色为结构默认（:root，「墨夜石墨」），亮色 / 跟随系统为覆盖层（「纸面仪器」）
    配套示意稿：docs/prototypes/redesign-v2/d2-mono-live.html
    签名元素：键帽（kbd）与 {{变量}} 凹井刻痕
    ============================================ */
 
-/* ---------- 原料层（primitive）：纯中性石墨灰阶，禁止在组件里直接引用 ---------- */
+/* ---------- 原料层（primitive）：暖灰纸面/墨夜灰阶（铁律 1：B 通道压暗 1–2 的
+   暖调微差，禁止纯黑 #000），禁止在组件里直接引用 ---------- */
 :root {
-  /* 石墨（亮色骨架：R=G=B 严格纯中性，禁止偏色） */
-  --g-0: #ffffff;
-  --g-50: #fafafa;
-  --g-100: #f4f4f4;
-  --g-150: #ececec;
-  --g-200: #e3e3e3;
-  --g-250: #d8d8d8;
-  --g-300: #cccccc;
-  --g-400: #b3b3b3;
-  --g-500: #999999;
-  --g-600: #7a7a7a;
-  --g-700: #5e5e5e;
-  --g-800: #424242;
-  --g-900: #2b2b2b;
-  --g-950: #1c1c1c;
-  --g-1000: #111111;
+  /* 纸面（亮色骨架：以 #f5f5f3 画布 / #fcfcfb 面板为锚点的暖灰梯） */
+  --g-0: #fcfcfb;
+  --g-50: #fafaf9;
+  --g-100: #f5f5f3;
+  --g-150: #ececea;
+  --g-200: #e3e3e1;
+  --g-250: #d8d8d6;
+  --g-300: #ccccca;
+  --g-400: #b3b3b1;
+  --g-500: #999997;
+  --g-600: #7a7a78;
+  --g-700: #5e5e5c;
+  --g-800: #424240;
+  --g-900: #2b2b29;
+  --g-950: #1c1c1a;
+  --g-1000: #111110;
 
-  /* 墨夜（暗色主题的石墨面） */
-  --n-900: #141414;
-  --n-800: #191919;
-  --n-700: #1f1f1f;
-  --n-600: #262626;
-  --n-500: #2e2e2e;
+  /* 墨夜（暗色主题的石墨面：铁律锚点 #0b0b0a/#151515/#1a1a19/#20201e，#262624 续梯） */
+  --n-900: #0b0b0a;
+  --n-800: #151515;
+  --n-700: #1a1a19;
+  --n-600: #20201e;
+  --n-500: #262624;
 
   /* 骨白（暗色主题的反白强调——白键） */
-  --w-300: #e8e8e8;
-  --w-200: #efefef;
-  --w-100: #f4f4f4;
+  --w-300: #e8e8e6;
+  --w-200: #efefed;
+  --w-100: #f4f4f2;
 
   /* 语义功能色（唯一非黑白：小面积状态指示） */
   --signal-red: #a83a32;
@@ -65,6 +70,13 @@
   --fs-xl: 19px;
   --fs-2xl: 24px;
 
+  /* 字重令牌（铁律 3）：暗色整体 -40 防白字发胖，亮色覆盖回标准值。
+     静态字重字体按就近匹配渲染（460→400 等），接入可变字重字体后逐级生效 */
+  --fw-500: 460;
+  --fw-600: 560;
+  --fw-650: 610;
+  --fw-700: 660;
+
   /* z-index 刻度 */
   --z-base: 0;
   --z-raised: 10;
@@ -84,8 +96,8 @@
   --brand-soft: rgba(232, 232, 232, 0.08);
   --brand-soft-2: rgba(232, 232, 232, 0.14);
   --ring: rgba(232, 232, 232, 0.5);
-  /* 兼容名保留：原「命令栏聚焦光晕」现为黑键聚焦环，无发光 */
-  --glow: 0 0 0 1px var(--brand-soft-2), 0 0 0 3px var(--brand-soft);
+  /* 聚焦双环（铁律 2）：不加 outline，内环贴边「咬合」+ 外环加深晕开 */
+  --glow: 0 0 0 1px var(--ring), 0 0 0 4px var(--brand-soft-2);
 
   /* 中性色（墨夜 · 石墨） */
   --bg: var(--n-900);
@@ -121,11 +133,11 @@
 
   /* 交互 */
   --accent: var(--brand);
-  /* 实体键三面（暗色键）：key-1 亮面 / key-2 暗面 / edge 厚度硬底边 */
-  --key-1: #2e2e2e;
-  --key-2: #262626;
-  --edge: #0d0d0d;
-  --edge-strong: #000000;
+  /* 实体键三面（暗色键）：key-1 亮面 / key-2 暗面 / edge 厚度硬底边（禁纯黑 #000） */
+  --key-1: #292927;
+  --key-2: #222220;
+  --edge: #0a0a09;
+  --edge-strong: #070706;
   --kbd-bg: linear-gradient(180deg, var(--key-1) 0%, var(--key-2) 100%);
   --input-bg: var(--n-600);
   --input-focus-bg: var(--n-500);
@@ -150,8 +162,11 @@
   --shadow-brand: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1.5px 0 rgba(0, 0, 0, 0.6),
     0 2px 6px rgba(0, 0, 0, 0.3);
 
-  /* 动效（仪器手感：ease-out 为主 + 小幅过冲弹簧；UI 全部 <350ms） */
+  /* 动效（仪器手感：ease-out 为主 + 小幅过冲弹簧；UI 全部 <350ms）
+     弹簧分性格（铁律 9）：拖拽/位移用 --spring-damped（1200/80 过阻尼，零回弹咬死）；
+     点赞/对勾类反馈用 --ease-spring（380/18 欠阻尼，微弹） */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --spring-damped: cubic-bezier(0.19, 1, 0.22, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --t-fast: 110ms var(--ease);
   --t-med: 190ms var(--ease);
@@ -184,8 +199,14 @@
   --lt-brand-2: var(--g-800);
   --lt-brand-soft: rgba(28, 28, 28, 0.055);
   --lt-brand-soft-2: rgba(28, 28, 28, 0.1);
-  --lt-ring: rgba(28, 28, 28, 0.5);
-  --lt-glow: 0 0 0 1px var(--lt-brand-soft-2), 0 0 0 3px var(--lt-brand-soft);
+  --lt-ring: rgba(28, 28, 26, 0.5);
+  --lt-glow: 0 0 0 1px var(--lt-ring), 0 0 0 4px var(--lt-brand-soft-2);
+
+  /* 亮色字重回标准值（铁律 3 的亮色侧） */
+  --lt-fw-500: 500;
+  --lt-fw-600: 600;
+  --lt-fw-650: 650;
+  --lt-fw-700: 700;
 
   --lt-bg: var(--g-100);
   --lt-bg-soft: var(--g-150);
@@ -213,10 +234,10 @@
   /* 变量记号：石墨刻字（凹井里的深灰刻痕） */
   --lt-var: var(--g-800);
 
-  --lt-key-1: #ffffff;
-  --lt-key-2: #f0f0f0;
-  --lt-edge: #d2d2d2;
-  --lt-edge-strong: #b8b8b8;
+  --lt-key-1: #fcfcfb;
+  --lt-key-2: #f1f1ef;
+  --lt-edge: #d4d4d2;
+  --lt-edge-strong: #b8b8b6;
   --lt-input-bg: var(--g-100);
   --lt-input-focus-bg: var(--g-0);
   --lt-kbd-bg: linear-gradient(180deg, var(--lt-key-1) 0%, var(--lt-key-2) 100%);
@@ -246,6 +267,10 @@
   --brand-soft-2: var(--lt-brand-soft-2);
   --ring: var(--lt-ring);
   --glow: var(--lt-glow);
+  --fw-500: var(--lt-fw-500);
+  --fw-600: var(--lt-fw-600);
+  --fw-650: var(--lt-fw-650);
+  --fw-700: var(--lt-fw-700);
 
   --bg: var(--lt-bg);
   --bg-soft: var(--lt-bg-soft);
