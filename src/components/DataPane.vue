@@ -5,6 +5,7 @@ import { FileUp, FileDown, FileJson, FileType2, FolderOpen } from 'lucide-vue-ne
 import { api } from '../lib/api';
 import { managerKey } from '../lib/context';
 import AccentButton from './ui/AccentButton.vue';
+import FlowText from './ui/FlowText.vue';
 
 const ctx = inject(managerKey)!;
 const includeClipboard = ref(false);
@@ -91,7 +92,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="de">
     <header class="de-head">
-      <h2 class="de-title">数据</h2>
+      <h2 class="de-title"><FlowText text="数据" /></h2>
       <span class="grow" />
     </header>
 
@@ -175,12 +176,11 @@ onBeforeUnmount(() => {
   padding: 0 18px;
   height: 52px;
   flex: none;
-  border-bottom: 1px solid var(--border);
 }
 
 .de-title {
   font-size: var(--fs-lg);
-  font-weight: 650;
+  font-weight: var(--fw-650);
   letter-spacing: normal;
 }
 
@@ -236,7 +236,7 @@ onBeforeUnmount(() => {
 
 .dropzone h3 {
   font-size: var(--fs-lg);
-  font-weight: 650;
+  font-weight: var(--fw-650);
 }
 
 .desc {
@@ -249,7 +249,7 @@ onBeforeUnmount(() => {
   margin-top: 8px;
 }
 
-/* 合并语义（M7.1）：拖拽区语义行 + 按钮旁放心导入 */
+/* 合并语义（M7.1）：拖拽区语义行 + 按钮旁放心导入（铁律 1：状态胶囊不描边） */
 .merge-line {
   display: inline-block;
   margin-top: 4px;
@@ -257,7 +257,6 @@ onBeforeUnmount(() => {
   line-height: 1.6;
   color: var(--ok);
   background: var(--ok-soft);
-  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
   border-radius: 999px;
   padding: 3px 14px;
 }
@@ -285,7 +284,7 @@ onBeforeUnmount(() => {
 .ex-head h3 {
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   letter-spacing: 0.08em;
   color: var(--faint);
 }
@@ -330,7 +329,7 @@ onBeforeUnmount(() => {
 
 .ov-row .tnum {
   color: var(--text);
-  font-weight: 600;
+  font-weight: var(--fw-600);
   margin-left: 2px;
 }
 

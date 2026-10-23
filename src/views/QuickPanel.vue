@@ -620,7 +620,7 @@ onBeforeUnmount(() => {
   flex: none;
 }
 
-/* 命令栏：凹槽井——内阴影下压，聚焦换黑键环 */
+/* 命令栏：凹槽井（铁律 1：静态无边框）——内阴影下压，聚焦换双环（铁律 2） */
 .cmd {
   flex: 1;
   min-width: 0;
@@ -629,16 +629,14 @@ onBeforeUnmount(() => {
   gap: 9px;
   padding: 0 12px;
   background: var(--input-bg);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   height: 42px;
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
-  transition: border-color var(--t-med), box-shadow var(--t-med);
+  transition: box-shadow var(--t-med), background var(--t-med);
 }
 
 .cmd:focus-within {
-  border-color: transparent;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05), var(--glow);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.03), var(--glow);
 }
 
 .cmd-ico {
@@ -680,7 +678,6 @@ onBeforeUnmount(() => {
   padding: 0;
   border-radius: var(--r-sm);
   color: var(--muted);
-  border-color: transparent;
   background: transparent;
   box-shadow: none;
   flex: none;
@@ -689,7 +686,6 @@ onBeforeUnmount(() => {
 .icon-btn:hover {
   background: var(--panel-2);
   color: var(--text);
-  border-color: transparent;
   transform: none;
 }
 
@@ -706,19 +702,18 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-/* 实体键 chips：静止平放，hover 上浮 1px + 底边变实 */
+/* 实体键 chips：静止平放，hover 上浮 1px + 底边变实（铁律 1：无边框） */
 .chip {
   padding: 4px 12px;
   border-radius: 999px;
   font-size: 12px;
   color: var(--muted);
   background: transparent;
-  border: 1px solid var(--border);
   box-shadow: none;
   flex: none;
   gap: 6px;
   transition: transform var(--t-spring), background var(--t-fast), color var(--t-fast),
-    border-color var(--t-fast), box-shadow var(--t-fast);
+    box-shadow var(--t-fast);
 }
 
 .chip-dot {
@@ -731,7 +726,6 @@ onBeforeUnmount(() => {
 .chip:hover {
   color: var(--text);
   background: var(--panel-2);
-  border-color: var(--border-strong);
   box-shadow: 0 1.5px 0 var(--edge), 0 2px 5px rgba(0, 0, 0, 0.1);
   transform: translateY(-1px);
 }
@@ -744,9 +738,8 @@ onBeforeUnmount(() => {
 /* 激活 = 按住的黑键 */
 .chip.on {
   background: var(--sel-bg);
-  border-color: var(--border-strong);
   color: var(--text);
-  font-weight: 600;
+  font-weight: var(--fw-600);
   transform: none;
   box-shadow: inset 0 0 0 1px var(--border-strong), inset 0 2px 4px rgba(17, 17, 17, 0.08);
 }
@@ -876,7 +869,7 @@ onBeforeUnmount(() => {
 
 .hl {
   color: var(--brand);
-  font-weight: 700;
+  font-weight: var(--fw-700);
 }
 
 /* 黑键行内的搜索高亮：反白 + 下划线保持可读 */
@@ -895,7 +888,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   font-size: 14px;
   min-width: 0;
   overflow: hidden;
@@ -967,7 +960,7 @@ onBeforeUnmount(() => {
 .grp {
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   color: var(--faint);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -978,7 +971,7 @@ onBeforeUnmount(() => {
 .grp-h {
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   color: var(--faint);
   letter-spacing: 0.08em;
   padding: 8px 4px 2px;
@@ -988,7 +981,7 @@ onBeforeUnmount(() => {
   padding-top: 2px;
 }
 
-/* 类型图标独立列（与主窗口 ClipboardPane .kind-ico 同族） */
+/* 类型图标独立列（与主窗口 ClipboardPane .kind-ico 同族，铁律 1：无边框） */
 .kind-ico {
   flex: none;
   width: 22px;
@@ -998,14 +991,12 @@ onBeforeUnmount(() => {
   border-radius: var(--r-xs);
   color: var(--faint);
   background: var(--panel-2);
-  border: 1px solid var(--border);
 }
 
 /* 黑键行内的类型图标：反白成键面上的小键 */
 .item.active .kind-ico {
   background: var(--on-brand);
   color: var(--brand-btn);
-  border-color: transparent;
 }
 
 .item-img {
@@ -1014,16 +1005,14 @@ onBeforeUnmount(() => {
   /* 大图不横占整行：限宽 420px 或 78%，与列表文本列宽协调 */
   max-width: min(420px, 78%);
   border-radius: var(--r-xs);
-  border: 1px solid var(--border);
 }
 
-/* 底栏键位图例 */
+/* 底栏键位图例（铁律 1：与列表区靠底色差分层，不画线） */
 .qp-foot {
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 8px 14px;
-  border-top: 1px solid var(--border);
   background: var(--bg-soft);
   flex: none;
   font-size: 12px;
@@ -1065,7 +1054,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-2);
   padding: 14px 16px;
@@ -1073,7 +1061,7 @@ onBeforeUnmount(() => {
 }
 
 .detail-title {
-  font-weight: 650;
+  font-weight: var(--fw-650);
   font-size: var(--fs-lg);
   overflow: hidden;
   text-overflow: ellipsis;

@@ -359,14 +359,13 @@ const tabs = [
   background: var(--bg);
 }
 
-/* 自定义标题栏：拖拽区（双击最大化由 Tauri 拖拽区处理） */
+/* 自定义标题栏：拖拽区（双击最大化由 Tauri 拖拽区处理；铁律 1：与内容区靠底色差分层） */
 .tb {
   display: flex;
   align-items: center;
   height: 36px;
   flex: none;
   padding: 0 6px 0 14px;
-  border-bottom: 1px solid var(--border);
   background: var(--bg-soft);
   user-select: none;
 }
@@ -390,7 +389,6 @@ const tabs = [
   height: 26px;
   min-width: 0;
   padding: 0;
-  border: none;
   background: transparent;
   border-radius: var(--r-xs);
   color: var(--muted);
@@ -400,14 +398,12 @@ const tabs = [
 .tb-btn:hover {
   background: var(--panel-2);
   color: var(--text);
-  border-color: transparent;
   transform: none;
   box-shadow: none;
 }
 
 .tb-close:hover {
   background: var(--danger-btn);
-  border-color: transparent;
   color: #fff;
 }
 
@@ -417,7 +413,7 @@ const tabs = [
   display: flex;
 }
 
-/* 图标栏：品牌标 + 图标导航 + 同步状态灯 */
+/* 图标栏：品牌标 + 图标导航 + 同步状态灯（铁律 1：与内容区靠底色差分层） */
 .mg-side {
   width: 64px;
   flex: none;
@@ -425,7 +421,6 @@ const tabs = [
   flex-direction: column;
   align-items: center;
   padding: 12px 0 14px;
-  border-right: 1px solid var(--border);
   background: var(--bg-soft);
   gap: 6px;
 }
@@ -435,7 +430,6 @@ const tabs = [
   width: 34px;
   height: 34px;
   border-radius: var(--r-key);
-  border: 1px solid var(--edge-strong);
   display: grid;
   place-items: center;
   background: var(--brand-btn);
@@ -462,7 +456,6 @@ const tabs = [
   width: 48px;
   height: auto;
   padding: 6px 0 5px;
-  border: none;
   background: transparent;
   border-radius: var(--r-sm);
   color: var(--muted);
@@ -482,7 +475,6 @@ const tabs = [
 .nav-btn:hover {
   background: var(--panel-2);
   color: var(--text);
-  border-color: transparent;
   transform: none;
   box-shadow: none;
 }
@@ -503,7 +495,6 @@ const tabs = [
 .nav-btn.on {
   background: var(--sel-bg);
   color: var(--text);
-  border-color: transparent;
   box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.1), 0 0 0 1px var(--border-strong);
 }
 
@@ -615,17 +606,15 @@ const tabs = [
   margin-left: 10px;
   padding: 2px 12px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   border-radius: 999px;
   background: transparent;
-  border-color: transparent;
   color: var(--on-brand);
   box-shadow: none;
 }
 
 .toast-action:hover {
   background: color-mix(in srgb, var(--on-brand) 12%, transparent);
-  border-color: transparent;
   color: var(--on-brand);
   transform: none;
   box-shadow: none;

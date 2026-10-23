@@ -121,7 +121,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
 .cd-card {
   width: min(400px, calc(100vw - 48px));
   background: var(--panel);
-  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-2);
   padding: 18px;
@@ -148,7 +147,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
 }
 
 .cd-title {
-  font-weight: 650;
+  font-weight: var(--fw-650);
   font-size: var(--fs-lg);
   flex: 1;
 }
@@ -158,7 +157,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
   width: 26px;
   height: 26px;
   padding: 0;
-  border-color: transparent;
   background: transparent;
   color: var(--muted);
   box-shadow: none;
@@ -167,7 +165,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
 
 .cd-x:hover {
   background: var(--panel-2);
-  border-color: var(--border);
   color: var(--text);
   transform: none;
   box-shadow: none;
@@ -199,9 +196,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
 /* 确认键：黑键（与全局 button.primary 同物理——浮起/悬停加亮/按压内陷） */
 .cd-confirm {
   background: linear-gradient(180deg, var(--brand-btn) 0%, var(--brand-strong) 100%);
-  border-color: var(--edge-strong);
   color: var(--on-brand);
-  font-weight: 600;
+  font-weight: var(--fw-600);
   box-shadow: var(--shadow-brand);
 }
 
@@ -219,7 +215,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
 /* 危险确认：走全局 danger 键语义——红字 + 悬停红染（实体键物理保留） */
 .cd-confirm.danger {
   background: linear-gradient(180deg, var(--key-1) 0%, var(--key-2) 100%);
-  border-color: var(--border);
   color: var(--danger);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1.5px 0 var(--edge),
     0 2px 4px rgba(17, 17, 17, 0.06);
@@ -227,7 +222,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
 
 .cd-confirm.danger:hover {
   background: var(--danger-soft);
-  border-color: var(--danger-btn);
   color: var(--danger);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1.5px 0 var(--edge-strong),
     0 4px 10px rgba(17, 17, 17, 0.1);

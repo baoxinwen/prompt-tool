@@ -217,7 +217,6 @@ onBeforeUnmount(() => { unlisten?.(); unlisten = null; });
 
 .upd-avail {
   background: var(--panel-2);
-  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   padding: 12px 14px;
 }
@@ -232,7 +231,6 @@ onBeforeUnmount(() => { unlisten?.(); unlisten = null; });
   line-height: 1.6;
   color: var(--text-2);
   background: var(--panel);
-  border: 1px solid var(--border);
   border-radius: var(--r-xs);
   padding: 8px 10px;
   margin: 8px 0 10px;
@@ -271,11 +269,11 @@ onBeforeUnmount(() => { unlisten?.(); unlisten = null; });
 
 .upd-err {
   background: var(--warn-soft);
-  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
   border-radius: var(--r-sm);
   padding: 10px 14px;
   font-size: var(--fs-sm);
   color: var(--text-2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent);
 }
 
 .upd-err .upd-actions {

@@ -197,7 +197,7 @@ onBeforeUnmount(() => {
 }
 
 .cv-title {
-  font-weight: 650;
+  font-weight: var(--fw-650);
   font-size: 14px;
 }
 
@@ -210,7 +210,6 @@ onBeforeUnmount(() => {
   width: 26px;
   height: 26px;
   padding: 0;
-  border-color: transparent;
   background: transparent;
   box-shadow: none;
   transform: none;
@@ -255,10 +254,9 @@ onBeforeUnmount(() => {
 
 .cv-foot .ab kbd {
   margin-left: 7px;
-  /* 随主按钮反色自适应：亮=墨底白键帽，暗=骨白底炭键帽 */
+  /* 随主按钮反色自适应：亮=墨底白键帽，暗=骨白底炭键帽（反色描边由内阴影环承担） */
   background: color-mix(in srgb, var(--on-brand) 14%, transparent);
-  border-color: color-mix(in srgb, var(--on-brand) 28%, transparent);
-  box-shadow: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-brand) 28%, transparent);
   color: var(--on-brand);
   font-size: 10px;
   padding: 2px 5px;
@@ -276,12 +274,10 @@ select {
 .cv-foot .ab:disabled {
   color: var(--ok);
   background: var(--ok-soft);
-  border-color: transparent;
 }
 
 .ghost-btn {
   background: transparent;
-  border-color: transparent;
   box-shadow: none;
   font-size: 12px;
   color: var(--muted);
@@ -299,7 +295,6 @@ select {
 .ghost-btn:hover {
   color: var(--text);
   background: var(--panel-2);
-  border-color: var(--border);
   transform: none;
 }
 </style>

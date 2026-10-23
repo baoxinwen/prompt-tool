@@ -6,6 +6,7 @@ import { managerKey } from '../lib/context';
 import { relativeTime } from '../lib/relativeTime';
 import AccentButton from './ui/AccentButton.vue';
 import Segmented from './ui/Segmented.vue';
+import FlowText from './ui/FlowText.vue';
 
 const ctx = inject(managerKey)!;
 
@@ -254,7 +255,7 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 <template>
   <div class="sync">
     <header class="sync-head">
-      <h2 class="sync-title">云同步</h2>
+      <h2 class="sync-title"><FlowText text="云同步" /></h2>
       <span class="on-badge" :class="{ on: state === 'on', ready: state === 'ready' }">
         <span class="on-dot" />
         {{ stateLabel }}
@@ -342,8 +343,6 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
             </span>
           </label>
         </div>
-
-        <div class="hairline" />
 
         <!-- 表单字段（跟随上方 provider 选择） -->
         <!-- WebDAV 表单 -->
@@ -472,12 +471,11 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
   padding: 0 18px;
   height: 52px;
   flex: none;
-  border-bottom: 1px solid var(--border);
 }
 
 .sync-title {
   font-size: var(--fs-lg);
-  font-weight: 650;
+  font-weight: var(--fw-650);
   letter-spacing: normal;
 }
 
@@ -488,7 +486,6 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
   font-size: 11px;
   color: var(--faint);
   background: var(--panel-2);
-  border: 1px solid var(--border);
   padding: 2.5px 10px;
   border-radius: 999px;
 }
@@ -503,7 +500,6 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 .on-badge.ready {
   color: var(--warn);
   background: var(--warn-soft);
-  border-color: transparent;
 }
 
 .on-badge.ready .on-dot {
@@ -513,7 +509,6 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 .on-badge.on {
   color: var(--ok);
   background: var(--ok-soft);
-  border-color: transparent;
 }
 
 .on-badge.on .on-dot {
@@ -584,7 +579,7 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 }
 
 .ov-title {
-  font-weight: 650;
+  font-weight: var(--fw-650);
   font-size: var(--fs-lg);
 }
 
@@ -592,7 +587,6 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
   font-size: 11px;
   padding: 2px 9px;
   border-radius: 999px;
-  border: 1px solid transparent;
   color: var(--faint);
   background: var(--panel-2);
 }
@@ -639,7 +633,6 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 
 .go-fill {
   color: var(--warn);
-  border-color: var(--warn);
   background: var(--warn-soft);
 }
 
@@ -666,12 +659,6 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
   gap: 12px;
 }
 
-.hairline {
-  height: 1px;
-  background: var(--border);
-  flex: none;
-}
-
 /* 表单区 */
 
 .form {
@@ -685,7 +672,6 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
   line-height: 1.7;
   padding: 9px 12px;
   background: var(--bg-soft);
-  border: 1px solid var(--border);
   border-radius: var(--r-sm);
 }
 
@@ -750,7 +736,6 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 
 .warn-hint {
   color: var(--warn);
-  border-color: var(--warn);
 }
 
 .btns {
@@ -766,7 +751,6 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
   padding: 9px 12px;
   border-radius: var(--r-sm);
   font-size: 13px;
-  border: 1px solid;
 }
 
 .status-prompt {
@@ -778,15 +762,15 @@ const httpWarn = () => /^http:\/\//i.test(url.value.trim());
 }
 
 .status.ok {
-  border-color: var(--ok);
   color: var(--ok);
   background: var(--ok-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 45%, transparent);
 }
 
 .status.err {
-  border-color: var(--danger-btn);
   color: var(--danger);
   background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger-btn) 55%, transparent);
 }
 
 .note {

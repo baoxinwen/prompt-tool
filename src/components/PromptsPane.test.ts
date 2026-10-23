@@ -561,7 +561,7 @@ describe('PromptsPane：提示词管理', () => {
     wrapper.unmount();
   });
 
-  it('复制：原文含占位符复制，按钮短暂显示「已复制 ✓」，toast 说明含占位符', async () => {
+  it('复制：原文含占位符复制，按钮短暂显示「已复制」对勾并 2.5s 自熄，toast 说明含占位符', async () => {
     vi.useFakeTimers();
     try {
       const { wrapper, ctx } = await mountPane([pVars]);
@@ -570,7 +570,8 @@ describe('PromptsPane：提示词管理', () => {
 
       await wrapper.find('.copy-btn').trigger('click');
       expect(mockedApi.copyText).toHaveBeenCalledWith(pVars.content);
-      expect(wrapper.find('.copy-btn').text()).toContain('已复制 ✓');
+      expect(wrapper.find('.copy-btn').text()).toContain('已复制');
+      expect(wrapper.find('.copy-btn svg').exists()).toBe(true);
       expect(ctx.toasts[ctx.toasts.length - 1]?.msg).toContain('占位符');
       // 按钮层级（R1 评审修正）：复制=实心墨块 primary（AccentButton）最右，
       // 填写变量并粘贴=次级 strong（面板底+描边+粗体）
@@ -578,8 +579,9 @@ describe('PromptsPane：提示词管理', () => {
       expect(wrapper.find('.fill-paste-btn').classes()).not.toContain('ab');
       expect(wrapper.find('.fill-paste-btn').classes()).toContain('strong-btn');
 
-      await vi.advanceTimersByTimeAsync(1_200);
-      expect(wrapper.find('.copy-btn').text()).not.toContain('已复制 ✓');
+      // 铁律 10：对勾 2.5s 后自熄恢复
+      await vi.advanceTimersByTimeAsync(2_800);
+      expect(wrapper.find('.copy-btn').text()).not.toContain('已复制');
       wrapper.unmount();
     } finally {
       vi.useRealTimers();

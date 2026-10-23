@@ -131,7 +131,6 @@ function onKeydown(e: KeyboardEvent, index: number) {
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-2);
   overflow: hidden;
@@ -142,7 +141,6 @@ function onKeydown(e: KeyboardEvent, index: number) {
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
   flex: none;
 }
 
@@ -156,7 +154,7 @@ function onKeydown(e: KeyboardEvent, index: number) {
 
 .vd-title {
   font-size: 15px;
-  font-weight: 650;
+  font-weight: var(--fw-650);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -195,7 +193,7 @@ function onKeydown(e: KeyboardEvent, index: number) {
 
 .vd-name {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   color: var(--brand);
   background: var(--brand-soft);
   border: 1px solid var(--brand-soft-2);
@@ -217,7 +215,6 @@ function onKeydown(e: KeyboardEvent, index: number) {
   align-items: center;
   gap: 8px;
   padding: 12px 14px;
-  border-top: 1px solid var(--border);
   flex: none;
 }
 

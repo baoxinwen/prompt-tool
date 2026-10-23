@@ -2,6 +2,7 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   Copy,
+  Check,
   Trash2,
   Search,
   SearchX,
@@ -13,8 +14,10 @@ import { api } from '../lib/api';
 import { managerKey } from '../lib/context';
 import { filterClipboard, formatTime } from '../lib/search';
 import { TIME_GROUPS, timeGroup, groupTimeLabel, type TimeGroupName } from '../lib/timeGroup';
+import { COPY_FEEDBACK_MS } from '../lib/copyFeedback';
 import { useImageThumbs } from '../lib/thumbs';
 import EmptyState from './ui/EmptyState.vue';
+import FlowText from './ui/FlowText.vue';
 import type { ClipboardItem } from '../types';
 
 const ctx = inject(managerKey)!;
@@ -75,13 +78,25 @@ function closeDetail() {
   detailItem.value = null;
 }
 
+/** 行级复制对勾：记录当前亮对勾的条目 id，2.5s 后自熄（铁律 10） */
+const copiedId = ref('');
+let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+
+function markCopied(id: string) {
+  copiedId.value = id;
+  clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => (copiedId.value = ''), COPY_FEEDBACK_MS);
+}
+
 async function copy(item: ClipboardItem) {
   try {
     if (item.kind === 'image') {
       await api.copyImage(item.id);
+      markCopied(item.id);
       ctx.toast('图片已复制到剪贴板');
     } else {
       await api.copyText(item.content);
+      markCopied(item.id);
       ctx.toast('已复制');
     }
   } catch (e) {
@@ -167,6 +182,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown);
   window.removeEventListener('pm-focus-search', focusSearch);
+  clearTimeout(copiedTimer);
 });
 </script>
 
@@ -174,7 +190,7 @@ onBeforeUnmount(() => {
   <div class="cb">
     <header class="cb-head">
       <h2 class="cb-title">
-        剪贴板
+        <FlowText text="剪贴板" />
         <span class="cb-count tnum">{{ totalCount }}</span>
       </h2>
       <span class="grow" />
@@ -200,7 +216,6 @@ onBeforeUnmount(() => {
         />
         <kbd class="search-hint">Ctrl K</kbd>
       </div>
-      <span class="head-sep" aria-hidden="true" />
       <button class="ghost-btn danger clear-btn" :disabled="!totalCount" @click="clearAll">
         <Trash2 :size="13" /> 清空
       </button>
@@ -236,8 +251,16 @@ onBeforeUnmount(() => {
           <div class="row-side">
             <span class="time tnum">{{ groupTimeLabel(c.copiedAt) }}</span>
             <span class="ops" @click.stop>
-              <button class="ghost-btn sm copy-btn" title="复制" @click="copy(c)">
-                <Copy :size="12" />
+              <button
+                class="ghost-btn sm copy-btn"
+                :class="{ copied: copiedId === c.id }"
+                title="复制"
+                @click="copy(c)"
+              >
+                <Transition name="cpfade" mode="out-in">
+                  <Check v-if="copiedId === c.id" key="d" :size="12" class="ok-ico" />
+                  <Copy v-else key="i" :size="12" />
+                </Transition>
               </button>
               <button class="ghost-btn sm danger" title="删除" @click="removeItem(c.id)">
                 <Trash2 :size="12" />
@@ -278,7 +301,18 @@ onBeforeUnmount(() => {
           <div class="detail-foot">
             <span class="faint"><kbd>←</kbd> 或 <kbd>Esc</kbd> 返回</span>
             <span class="grow" />
-            <button class="detail-copy" @click="copy(detailItem)"><Copy :size="13" /> 复制</button>
+            <button
+              class="detail-copy"
+              :class="{ copied: detailItem && copiedId === detailItem.id }"
+              @click="copy(detailItem)"
+            >
+              <Transition name="cpfade" mode="out-in">
+                <span v-if="detailItem && copiedId === detailItem.id" key="d" class="copy-face">
+                  <Check :size="13" class="ok-ico" />已复制
+                </span>
+                <span v-else key="i" class="copy-face"><Copy :size="13" /> 复制</span>
+              </Transition>
+            </button>
           </div>
         </div>
       </div>
@@ -300,7 +334,6 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 0 16px;
   height: 52px;
-  border-bottom: 1px solid var(--border);
   flex: none;
 }
 
@@ -309,7 +342,7 @@ onBeforeUnmount(() => {
   align-items: baseline;
   gap: 8px;
   font-size: var(--fs-lg);
-  font-weight: 650;
+  font-weight: var(--fw-650);
   letter-spacing: normal;
 }
 
@@ -317,7 +350,6 @@ onBeforeUnmount(() => {
   font-size: 11px;
   color: var(--faint);
   background: var(--panel-2);
-  border: 1px solid var(--border);
   padding: 1px 7px;
   border-radius: 999px;
 }
@@ -362,14 +394,6 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 
-/* 搜索框与清空之间的发丝分隔线 */
-.head-sep {
-  width: 1px;
-  height: 18px;
-  background: var(--border-strong);
-  flex: none;
-}
-
 .list {
   flex: 1;
   min-height: 0;
@@ -409,7 +433,7 @@ onBeforeUnmount(() => {
 .grp {
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   color: var(--faint);
   letter-spacing: 0.08em;
   padding: 10px 4px 0;
@@ -436,7 +460,7 @@ onBeforeUnmount(() => {
   background: var(--panel-2);
 }
 
-/* 类型图标独立列：面板上的小键 */
+/* 类型图标独立列：面板上的小键（铁律 1：无边框，底色差分层） */
 .kind-ico {
   flex: none;
   width: 22px;
@@ -446,7 +470,6 @@ onBeforeUnmount(() => {
   border-radius: var(--r-key);
   color: var(--faint);
   background: var(--panel-2);
-  border: 1px solid var(--border);
 }
 
 .content {
@@ -467,7 +490,6 @@ onBeforeUnmount(() => {
   height: 52px;
   max-width: 180px;
   object-fit: cover;
-  border: 1px solid var(--border);
   border-radius: var(--r-xs);
   background: var(--panel-2);
   flex: none;
@@ -502,7 +524,6 @@ onBeforeUnmount(() => {
 /* 透明幽灵键：清除实体键光影（透明底上会残留高光/硬底边伪影），悬停不位移 */
 .ghost-btn {
   background: transparent;
-  border-color: transparent;
   box-shadow: none;
   color: var(--muted);
   font-size: 12px;
@@ -512,12 +533,26 @@ onBeforeUnmount(() => {
 .ghost-btn:hover {
   color: var(--text);
   background: var(--panel-3);
-  border-color: var(--border);
   transform: none;
 }
 
 .ghost-btn.danger:hover {
   color: var(--danger);
+}
+
+/* 复制对勾（铁律 10）：对勾亮起时染 ok 色 */
+.copy-btn.copied {
+  color: var(--ok);
+}
+
+.ok-ico {
+  color: var(--ok);
+}
+
+.copy-face {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 /* 操作钮保持可点的最小命中面积 */
@@ -544,7 +579,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-2);
   padding: 14px 16px;
@@ -552,7 +586,7 @@ onBeforeUnmount(() => {
 }
 
 .detail-title {
-  font-weight: 650;
+  font-weight: var(--fw-650);
   font-size: var(--fs-lg);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -576,7 +610,6 @@ onBeforeUnmount(() => {
   max-width: 100%;
   max-height: 420px;
   object-fit: contain;
-  border: 1px solid var(--border);
   border-radius: var(--r-xs);
   background: var(--panel-2);
 }
@@ -594,6 +627,7 @@ onBeforeUnmount(() => {
 .detail-copy {
   padding: 5px 12px;
   font-size: 12px;
+  min-width: 84px;
 }
 
 .detail-enter-active,

@@ -27,13 +27,12 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>();
 </template>
 
 <style scoped>
-/* 轨道：凹槽井（内阴影下压，与全局输入井同族） */
+/* 轨道：凹槽井（铁律 1：无边框，内阴影下压，与全局输入井同族） */
 .seg {
   display: inline-flex;
   gap: 2px;
   padding: 3px;
   background: var(--input-bg);
-  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
 }
@@ -59,7 +58,7 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>();
 .seg-item.on {
   background: var(--panel-3);
   color: var(--text);
-  font-weight: 600;
+  font-weight: var(--fw-600);
   box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.08);
 }
 

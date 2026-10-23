@@ -124,20 +124,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCaptureKeydown, tr
   min-width: 150px;
   min-height: 34px;
   padding: 4px 12px;
-  border: 1px solid var(--border-strong);
   border-radius: var(--r-sm);
   background: var(--input-bg);
   cursor: pointer;
-  transition: border-color var(--t-fast), background var(--t-fast);
+  transition: background var(--t-fast), box-shadow var(--t-fast);
 }
 
 .key-slot:hover {
-  border-color: var(--brand);
+  background: var(--input-focus-bg);
 }
 
+/* 录制中（铁律 2）：双环咬合，不加描边 */
 .key-slot.capturing {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-soft);
+  background: var(--input-focus-bg);
+  box-shadow: var(--glow);
 }
 
 .key-slot.empty {
@@ -175,7 +175,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCaptureKeydown, tr
 
 .cap-card {
   background: var(--panel);
-  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
   padding: 24px 36px;
   text-align: center;
@@ -187,7 +186,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCaptureKeydown, tr
 
 .cap-title {
   font-size: var(--fs-lg);
-  font-weight: 650;
+  font-weight: var(--fw-650);
 }
 
 .cap-hint {

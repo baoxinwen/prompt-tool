@@ -4,6 +4,7 @@ import {
   Plus,
   Search,
   Copy,
+  Check,
   Trash2,
   Pin,
   PinOff,
@@ -19,6 +20,7 @@ import { extractVars, isAutoVar, applyVars, applyClipboardVar, clipboardVarRe, V
 import { matchText, highlightSegs } from '../lib/search';
 import { previewSegments } from '../lib/preview';
 import { categoryColor } from '../lib/categoryColor';
+import { useCopiedFlash } from '../lib/copyFeedback';
 import { emptyPrompt } from '../types';
 import type { Prompt, VarField } from '../types';
 import HotkeyInput from './HotkeyInput.vue';
@@ -26,6 +28,7 @@ import EmptyState from './ui/EmptyState.vue';
 import CategoryBadge from './ui/CategoryBadge.vue';
 import AccentButton from './ui/AccentButton.vue';
 import KeyCap from './ui/KeyCap.vue';
+import FlowText from './ui/FlowText.vue';
 
 const ctx = inject(managerKey)!;
 
@@ -33,8 +36,6 @@ const ctx = inject(managerKey)!;
 const AUTO_SAVE_DELAY = 900;
 /** 「✓ 已自动保存」提示停留时长 */
 const SAVED_TIP_MS = 2400;
-/** 复制按钮「已复制 ✓」回弹时长 */
-const COPY_TIP_MS = 1200;
 
 const selectedCategory = ref('');
 const query = ref('');
@@ -62,14 +63,13 @@ const saveState = ref<'idle' | 'dirty' | 'saved'>('idle');
 const varValues = ref<Record<string, string>>(Object.create(null) as Record<string, string>);
 /** 填写变量并粘贴进行中（防重复点击） */
 const pasteBusy = ref(false);
-/** 复制按钮「已复制 ✓」短暂态 */
-const copied = ref(false);
+/** 复制按钮「已复制 ✓」短暂态（铁律 10：2.5s 后自熄恢复） */
+const { copied, flash: markCopied } = useCopiedFlash();
 const contentEl = ref<HTMLTextAreaElement | null>(null);
 const mirrorEl = ref<HTMLElement | null>(null);
 
 let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
 let savedTipTimer: ReturnType<typeof setTimeout> | undefined;
-let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 let varLoadSeq = 0;
 
 const allPrompts = computed(() => ctx.data.value?.prompts ?? []);
@@ -346,9 +346,7 @@ async function copyContent() {
   if (!draft.value?.content) return;
   try {
     await api.copyText(draft.value.content);
-    copied.value = true;
-    clearTimeout(copiedTimer);
-    copiedTimer = setTimeout(() => (copied.value = false), COPY_TIP_MS);
+    markCopied();
     ctx.toast('已复制，含 {{变量}} 占位符原文');
   } catch (e) {
     ctx.toast(String(e), 'err');
@@ -561,7 +559,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('pm-focus-search', focusSearch);
   clearTimeout(autoSaveTimer);
   clearTimeout(savedTipTimer);
-  clearTimeout(copiedTimer);
 });
 
 function focusSearch() {
@@ -588,7 +585,7 @@ function fmtTime(ts: number) {
     <!-- 上下文工具栏：页名 + 计数 + 搜索 + 新建 -->
     <header class="pp-head">
       <h2 class="pp-title">
-        提示词
+        <FlowText text="提示词" />
       </h2>
       <span class="grow" />
       <div class="search-box">
@@ -641,14 +638,22 @@ function fmtTime(ts: number) {
           <button class="chip chip-add" title="新建分类" @click="toggleAddingCat">
             <Plus :size="12" />
           </button>
-          <input
-            v-if="addingCat"
-            ref="addCatInput"
-            v-model="newCatName"
-            class="chip-input"
-            placeholder="分类名，回车确认"
-            @keydown="onAddCategoryKeydown"
-          />
+          <!-- 丝滑折叠（铁律 7）：grid 0fr→1fr，免 JS 算高；列同步 0fr→132px 避免折叠期占位。
+               输入框外再包一层可收缩壳：input 的 border-box 有 padding 下限，
+               直接当折叠子项会残留 ~20px（收起态露馅） -->
+          <div class="chip-fold fold" :class="{ open: addingCat }">
+            <div class="chip-shell">
+              <input
+                ref="addCatInput"
+                v-model="newCatName"
+                class="chip-input"
+                placeholder="分类名，回车确认"
+                :tabindex="addingCat ? undefined : -1"
+                :aria-hidden="!addingCat"
+                @keydown="onAddCategoryKeydown"
+              />
+            </div>
+          </div>
         </div>
 
         <!-- 列表：扁平行 -->
@@ -813,8 +818,12 @@ function fmtTime(ts: number) {
             >
               <ClipboardPaste :size="14" />填写变量并粘贴
             </button>
+            <!-- 复制对勾（铁律 10 + 9）：对勾欠阻尼弹入，2.5s 后自熄淡出恢复 -->
             <AccentButton class="copy-btn" @click="copyContent">
-              <Copy :size="14" />{{ copied ? '已复制 ✓' : '复制' }}
+              <Transition name="cpfade" mode="out-in">
+                <span v-if="copied" key="done" class="copy-face"><Check :size="14" />已复制</span>
+                <span v-else key="idle" class="copy-face"><Copy :size="14" />复制</span>
+              </Transition>
             </AccentButton>
           </div>
         </template>
@@ -838,7 +847,7 @@ function fmtTime(ts: number) {
   min-height: 0;
 }
 
-/* 上下文工具栏 */
+/* 上下文工具栏（铁律 1：分区不画线，靠留白与列底色差分层） */
 .pp-head {
   display: flex;
   align-items: center;
@@ -846,7 +855,6 @@ function fmtTime(ts: number) {
   padding: 0 16px;
   height: 52px;
   flex: none;
-  border-bottom: 1px solid var(--border);
 }
 
 .pp-title {
@@ -854,7 +862,7 @@ function fmtTime(ts: number) {
   align-items: baseline;
   gap: 8px;
   font-size: var(--fs-lg);
-  font-weight: 650;
+  font-weight: var(--fw-650);
   letter-spacing: normal;
 }
 
@@ -902,7 +910,6 @@ function fmtTime(ts: number) {
 .col-list {
   width: 320px;
   flex: none;
-  border-right: 1px solid var(--border);
   background: var(--bg-soft);
   display: flex;
   flex-direction: column;
@@ -915,7 +922,6 @@ function fmtTime(ts: number) {
   flex-wrap: wrap;
   gap: 5px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
   flex: none;
 }
 
@@ -927,13 +933,12 @@ function fmtTime(ts: number) {
   color: var(--muted);
   background: var(--panel);
   gap: 6px;
-  transition: transform var(--t-spring), background var(--t-fast), border-color var(--t-fast),
+  transition: transform var(--t-spring), background var(--t-fast),
     box-shadow var(--t-spring), color var(--t-fast);
 }
 
 .chip:hover {
   background: var(--panel-2);
-  border-color: var(--border-strong);
   transform: translateY(-1px);
 }
 
@@ -946,9 +951,8 @@ function fmtTime(ts: number) {
 /* 选中分类 = 按下的凹面键（反馈轮：选中不用黑） */
 .chip.on {
   background: var(--sel-bg);
-  border-color: var(--border-strong);
   color: var(--text);
-  font-weight: 600;
+  font-weight: var(--fw-600);
   box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.08);
   transform: none;
 }
@@ -991,8 +995,24 @@ function fmtTime(ts: number) {
   padding: 3.5px 8px;
 }
 
+/* 新建分类输入的折叠壳：行高 0fr→1fr 展开，列 0fr→132px 同步避免折叠期占位。
+   .chip-shell 由全局 .fold > * 裁剪（overflow+min 尺寸归零），输入框的
+   padding 下限在壳内被裁掉，收起态才能完全隐身 */
+.chip-fold {
+  grid-template-columns: 0fr;
+  transition: grid-template-rows 240ms var(--ease), grid-template-columns 240ms var(--ease);
+}
+
+.chip-fold.open {
+  grid-template-columns: 132px;
+}
+
+.chip-shell {
+  min-width: 0;
+}
+
 .chip-input {
-  width: 132px;
+  width: 100%;
   padding: 4px 10px;
   font-size: 12px;
 }
@@ -1078,7 +1098,7 @@ function fmtTime(ts: number) {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1097,7 +1117,7 @@ function fmtTime(ts: number) {
 
 .hl {
   color: var(--brand);
-  font-weight: 700;
+  font-weight: var(--fw-700);
 }
 
 /* 次要信息行（快捷键/次数/变量数）：右对齐成尾部信息列，主行只留标题+徽章 */
@@ -1151,11 +1171,10 @@ function fmtTime(ts: number) {
   padding: 16px 18px 14px;
 }
 
-/* 编辑器头：分类色竖条 */
+/* 编辑器头：分类色竖条（铁律 1：无边框卡片，靠与画布的明度差浮起） */
 .d-hero {
   display: flex;
   gap: 14px;
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--panel);
   padding: 11px 14px;
@@ -1185,7 +1204,7 @@ function fmtTime(ts: number) {
 .d-cat {
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   letter-spacing: 0.08em;
   color: var(--muted);
 }
@@ -1202,7 +1221,6 @@ function fmtTime(ts: number) {
 
 .mini-btn.on {
   color: var(--warn);
-  border-color: var(--warn);
   background: var(--warn-soft);
 }
 
@@ -1210,7 +1228,7 @@ function fmtTime(ts: number) {
   border: none;
   background: transparent;
   font-size: 20px;
-  font-weight: 700;
+  font-weight: var(--fw-700);
   letter-spacing: normal;
   padding: 2px 0 0;
   color: var(--text);
@@ -1243,7 +1261,6 @@ function fmtTime(ts: number) {
 
 .d-card {
   background: var(--panel);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: 12px 14px;
   display: flex;
@@ -1262,7 +1279,7 @@ function fmtTime(ts: number) {
   justify-content: space-between;
   gap: 8px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   color: var(--muted);
 }
 
@@ -1287,7 +1304,7 @@ function fmtTime(ts: number) {
   font-size: 13px;
   line-height: 1.65;
   padding: 8px 10px;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--r-sm);
   white-space: pre-wrap;
   word-break: break-word;
@@ -1409,22 +1426,19 @@ function fmtTime(ts: number) {
   background: var(--ok-soft);
 }
 
-/* ghost 键：无阴影不上浮（悬停只换面/描边），按压留内陷反馈 */
+/* ghost 键：无阴影不上浮（悬停只换面），按压留内陷反馈（铁律 1：无边框） */
 .ghost-btn {
   background: transparent;
-  border-color: var(--border);
   color: var(--text-2);
   font-size: 13px;
   padding: 7px 14px;
   box-shadow: none;
   transform: none;
-  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast),
-    box-shadow var(--t-fast);
+  transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
 }
 
 .ghost-btn:hover {
   background: var(--panel-2);
-  border-color: var(--border-strong);
   transform: none;
   box-shadow: none;
 }
@@ -1434,20 +1448,29 @@ function fmtTime(ts: number) {
   box-shadow: inset 0 2px 4px rgba(17, 17, 17, 0.1);
 }
 
-/* 删除：红字描边恒定呈现（确认 + 撤销通知条行为不变） */
+/* 删除：红字恒定呈现（确认 + 撤销通知条行为不变），悬停红染 */
 .ghost-btn.danger {
   color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 32%, transparent);
 }
 
 .ghost-btn.danger:hover {
-  border-color: var(--danger);
   background: var(--danger-soft);
 }
 
-/* 填写变量并粘贴：次级 strong——面板底 + border-strong 描边 + 粗体（非实心墨块） */
+/* 填写变量并粘贴：次级 strong——抬起一档的面色 + 粗体（非实心墨块） */
 .strong-btn {
-  font-weight: 600;
-  border-color: var(--border-strong);
+  font-weight: var(--fw-600);
+  background: var(--panel-2);
+}
+
+/* 复制对勾（铁律 10）：两态文案同宽坑位，按钮宽度不跳 */
+.copy-btn {
+  min-width: 96px;
+}
+
+.copy-face {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 </style>

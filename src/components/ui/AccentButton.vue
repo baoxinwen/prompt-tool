@@ -10,12 +10,12 @@ defineProps<{ disabled?: boolean }>();
 </template>
 
 <style scoped>
-/* 黑键三态：浮起（渐变墨面 + 实体投影）→ 悬停加亮上浮 → 按下下沉内陷 */
+/* 黑键三态：浮起（渐变墨面 + 实体投影）→ 悬停加亮上浮 → 按下下沉内陷
+   （铁律 1：无边框，轮廓与厚度交给投影） */
 .ab {
   background: linear-gradient(180deg, var(--brand-btn) 0%, var(--brand-strong) 100%);
-  border: 1px solid var(--edge-strong);
   color: var(--on-brand);
-  font-weight: 600;
+  font-weight: var(--fw-600);
   padding: 7px 18px;
   border-radius: var(--r-key);
   cursor: pointer;
@@ -38,7 +38,6 @@ defineProps<{ disabled?: boolean }>();
   opacity: 1;
   background: var(--panel-2);
   color: var(--muted);
-  border-color: var(--border);
   box-shadow: none;
   transform: none;
   cursor: default;

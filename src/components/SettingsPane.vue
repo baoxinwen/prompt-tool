@@ -6,6 +6,7 @@ import { enqueueSettingsSave } from '../lib/settingsSave';
 import { managerKey } from '../lib/context';
 import HotkeyInput from './HotkeyInput.vue';
 import UpdateSection from './UpdateSection.vue';
+import FlowText from './ui/FlowText.vue';
 
 const ctx = inject(managerKey)!;
 
@@ -152,7 +153,7 @@ onMounted(() => {
 <template>
   <div class="st">
     <header class="st-head">
-      <h2 class="st-title">设置</h2>
+      <h2 class="st-title"><FlowText text="设置" /></h2>
       <span class="grow" />
     </header>
 
@@ -297,12 +298,11 @@ onMounted(() => {
   padding: 0 18px;
   height: 52px;
   flex: none;
-  border-bottom: 1px solid var(--border);
 }
 
 .st-title {
   font-size: var(--fs-lg);
-  font-weight: 650;
+  font-weight: var(--fw-650);
   letter-spacing: normal;
 }
 
@@ -322,7 +322,6 @@ onMounted(() => {
 
 .st-card {
   background: var(--panel);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: 6px 18px 12px;
 }
@@ -349,23 +348,19 @@ onMounted(() => {
 h3 {
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   letter-spacing: 0.08em;
   color: var(--faint);
 }
 
+/* 选项行（铁律 1：行间不画线，靠节奏与留白） */
 .opt {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 11px 0;
-  border-top: 1px solid var(--border);
+  padding: 12px 0;
   cursor: pointer;
-}
-
-.st-card .opt:first-of-type {
-  border-top: none;
 }
 
 .opt span:first-child {
@@ -393,18 +388,16 @@ h3 {
   gap: 0;
   padding: 0;
   overflow: hidden;
-  border: 1.5px solid var(--border);
   border-radius: var(--r-md);
 }
 
 .theme-card:hover {
-  border-color: var(--border-strong);
-  background: var(--panel);
+  background: var(--panel-2);
 }
 
+/* 选中（铁律 2 同族）：双环环合，不加描边 */
 .theme-card.on {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-soft);
+  box-shadow: inset 0 0 0 1px var(--ring), 0 0 0 4px var(--brand-soft-2);
 }
 
 .th-preview {
@@ -417,15 +410,15 @@ h3 {
 
 /* 预览小样写死目标主题的中性面板色（墨夜石墨 / 纸面仪器），不随页面主题变化（M8.4） */
 .th-dark .th-preview {
-  background: #141414;
+  background: #0b0b0a;
 }
 
 .th-light .th-preview {
-  background: #f4f4f4;
+  background: #f5f5f3;
 }
 
 .th-auto .th-preview {
-  background: linear-gradient(105deg, #141414 50%, #f4f4f4 50%);
+  background: linear-gradient(105deg, #0b0b0a 50%, #f5f5f3 50%);
 }
 
 /* 主题预览条：写死目标主题的强调色（黑键/白键），不随页面主题变化（M8.4） */
@@ -433,15 +426,15 @@ h3 {
   width: 55%;
   height: 8px;
   border-radius: 4px;
-  background: #999999;
+  background: #999997;
 }
 
 .th-dark .th-bar {
-  background: #e8e8e8;
+  background: #e8e8e6;
 }
 
 .th-light .th-bar {
-  background: #1c1c1c;
+  background: #1c1c1a;
 }
 
 .th-line {
@@ -463,13 +456,12 @@ h3 {
   padding: 7px 0;
   font-size: 12px;
   color: var(--text-2);
-  border-top: 1px solid var(--border);
   background: var(--panel-2);
 }
 
 .theme-card.on .th-label {
   color: var(--brand);
-  font-weight: 600;
+  font-weight: var(--fw-600);
 }
 
 .about {

@@ -40,7 +40,7 @@ withDefaults(
   user-select: none;
 }
 
-/* 图标容器：克制的呼吸（keyframes 复用全局 breathe） */
+/* 图标容器：克制的呼吸（keyframes 复用全局 breathe；铁律 1：虚线框去框，底色差分层） */
 .empty-icon {
   width: 50px;
   height: 50px;
@@ -48,7 +48,6 @@ withDefaults(
   display: grid;
   place-items: center;
   background: var(--panel-2);
-  border: 1px dashed var(--border-strong);
   color: var(--brand);
   margin-bottom: 2px;
   animation: breathe 2.6s var(--ease) infinite;
@@ -61,7 +60,7 @@ withDefaults(
 }
 
 .empty-title {
-  font-weight: 600;
+  font-weight: var(--fw-600);
   font-size: 14px;
   letter-spacing: 0.01em;
 }
